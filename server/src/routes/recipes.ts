@@ -4,12 +4,183 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { toNullIfEmpty, toOptionalNumber } from '../lib/normalize';
 import { broadcast } from '../lib/broadcaster';
 import { assertSafeIntegrationUrl, UnsafeUrlError } from '../utils/urlGuard';
-import { fetchHtmlPage, findRecipeJsonLd, normalizeJsonLdRecipe } from '../lib/recipeImport';
+import { fetchHtmlPage, findRecipeJsonLd, normalizeJsonLdRecipe, isInstagramUrl, formatInstagramEmbedUrl, parseInstagramRecipe, MOBILE_UA } from '../lib/recipeImport';
+import { decryptCredentials } from '../utils/crypto';
+import { aiComplete, AiError, type AiSettings } from '../services/ai';
 
 const router = Router();
 router.use(authMiddleware);
 
-// Import a recipe from a public URL (schema.org/Recipe JSON-LD).
+// Refine / parse a recipe using the configured AI model (Ollama / OpenAI / Anthropic).
+router.post('/refine-ai', async (req: AuthRequest, res) => {
+    try {
+        const { name, category, description, ingredients, instructions, rawText } = req.body as Record<string, any>;
+
+        const settingsRes = await query(
+            'SELECT provider, base_url, encrypted_api_key, model, enabled FROM ai_settings WHERE user_id = $1',
+            [req.userId]
+        );
+
+        const row = settingsRes.rows[0] as {
+            provider: 'ollama' | 'openai' | 'anthropic';
+            base_url: string | null;
+            encrypted_api_key: string | null;
+            model: string;
+            enabled: boolean;
+        } | undefined;
+
+        if (!row || !row.enabled || !row.model) {
+            return res.status(400).json({
+                success: false,
+                error: 'AI_NOT_CONFIGURED',
+                message: 'AI assistant is disabled or not configured in Settings > AI Assistant',
+            });
+        }
+
+        let apiKey: string | null = null;
+        if (row.encrypted_api_key) {
+            try {
+                apiKey = decryptCredentials(row.encrypted_api_key).api_key ?? null;
+            } catch {}
+        }
+
+        const aiSettings: AiSettings = {
+            provider: row.provider,
+            base_url: row.base_url,
+            api_key: apiKey,
+            model: row.model,
+        };
+
+        const RECIPE_SCHEMA = {
+            type: 'object',
+            properties: {
+                name: { type: 'string' },
+                category: { type: 'string', enum: ['Entrée', 'Plat', 'Dessert', 'Snack'] },
+                description: { type: 'string' },
+                ingredients: { type: 'array', items: { type: 'string' } },
+                instructions: { type: 'array', items: { type: 'string' } },
+                prep_time: { type: 'number' },
+                cook_time: { type: 'number' },
+                servings: { type: 'number' },
+            },
+            required: ['name', 'category', 'ingredients', 'instructions'],
+            additionalProperties: false,
+        };
+
+        const contentToRefine = rawText || `
+Title: ${name || ''}
+Category: ${category || ''}
+Description: ${description || ''}
+Ingredients:
+${Array.isArray(ingredients) ? ingredients.join('\n') : (ingredients || '')}
+Instructions:
+${Array.isArray(instructions) ? instructions.join('\n') : (instructions || '')}
+        `.trim();
+
+        const parsed = await aiComplete(aiSettings, {
+            system: `Você é um chef profissional e especialista gastronômico do aplicativo OpenFamily.
+Sua missão é analisar a receita fornecida e refiná-la/estruturá-la impecavelmente para o português (pt-BR).
+
+REGRAS RÍGIDAS DE ESTRUTURAÇÃO E ORGANIZAÇÃO:
+1. "name": Título limpo, conciso e convidativo da receita.
+2. "category": Escolha rigorosamente a melhor opção entre:
+   - "Entrée" (Entrada/Salada/Sopa/Antepasto)
+   - "Plat" (Prato Principal/Almoço/Jantar)
+   - "Dessert" (Sobremesa/Bolo/Torta/Doce/Glaçagem)
+   - "Snack" (Lanche/Café/Petisco)
+3. "description": Resumo apetitoso de 1 a 2 frases explicando o prato.
+4. "ingredients":
+   - Mantenha cada ingrediente limpo e com suas quantidades padronizadas (ex: "4 ovos", "1.5 xícara de açúcar (300g)", "200ml de suco de laranja").
+   - IMPORTANTE (SUBSEÇÕES): Se a receita tiver partes separadas (ex: Massa, Cobertura, Recheio, Glaçagem, Calda), adicione o prefixo entre colchetes em cada item! Exemplo:
+     "[Massa] 4 ovos"
+     "[Massa] 2 xícaras de farinha"
+     "[Cobertura] 1 xícara de açúcar de confeiteiro"
+     "[Cobertura] 3 colheres de suco de laranja"
+5. "instructions":
+   - Organize o passo a passo em ordem cronológica exata.
+   - IMPORTANTE (SUBSEÇÕES NOS PASSOS): Se a receita incluir preparos separados (ex: Massa x Cobertura), identifique claramente qual etapa pertence a qual parte! Exemplo:
+     "[Massa] Esfregue as raspas da laranja no açúcar. Acrescente os ovos e bata até ficar homogêneo."
+     "[Massa] Adicione o suco e óleo, misture a farinha e por último o fermento. Leve ao forno a 180°C por 40 min."
+     "[Cobertura] Misture o açúcar de confeiteiro com o suco de laranja e leve 20s ao micro-ondas."
+     "[Cobertura] Despeje a calda aquecida imediatamente sobre o bolo morno."
+   - Elimine conversas fiadas, propagandas ou frases irrelevantes.
+6. Se identificados, preencha prep_time, cook_time e servings em minutos/número de porções.`,
+            user: `Refine a seguinte receita:\n\n${contentToRefine}`,
+            jsonSchema: RECIPE_SCHEMA,
+        }) as Record<string, any>;
+
+        const usage = parsed._usage || null;
+        delete parsed._usage;
+
+        res.json({
+            success: true,
+            data: parsed,
+            usage,
+            provider: row.provider,
+            model: row.model,
+        });
+    } catch (error) {
+        if (error instanceof AiError) {
+            return res.status(502).json({ success: false, error: error.code, message: error.message });
+        }
+        console.error('Refine recipe AI error:', error);
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+// Add selected recipe ingredients to user's shopping list
+router.post('/add-to-shopping', async (req: AuthRequest, res) => {
+    try {
+        const { items, recipeName } = req.body as { items?: string[]; recipeName?: string };
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, error: 'items array is required' });
+        }
+
+        // Fetch existing shopping list items to detect duplicates
+        const existingRes = await query('SELECT name FROM shopping_items WHERE user_id = $1', [req.userId]);
+        const existingNames = new Set(
+            existingRes.rows.map((r: { name: string }) => r.name.toLowerCase().trim())
+        );
+
+        let addedCount = 0;
+        let duplicateCount = 0;
+
+        for (const rawItem of items) {
+            const cleanItem = typeof rawItem === 'string' ? rawItem.replace(/^\[[^\]]+\]\s*/, '').trim() : '';
+            if (!cleanItem) continue;
+
+            const isDuplicate = existingNames.has(cleanItem.toLowerCase());
+            if (isDuplicate) {
+                duplicateCount++;
+            }
+
+            await query(
+                `INSERT INTO shopping_items (user_id, name, category, notes)
+                 VALUES ($1, $2, $3, $4)`,
+                [
+                    req.userId,
+                    cleanItem,
+                    'Alimentation',
+                    recipeName ? `Receita: ${recipeName}` : 'Adicionado via Receitas',
+                ]
+            );
+            addedCount++;
+        }
+
+        broadcast(req.userId!, { type: 'update', entity: 'shopping', action: 'created' });
+
+        res.json({
+            success: true,
+            addedCount,
+            duplicateCount,
+        });
+    } catch (error) {
+        console.error('Add ingredients to shopping list error:', error);
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+// Import a recipe from a public URL (schema.org/Recipe JSON-LD or Instagram Reels/Posts).
 // Parses and returns the recipe WITHOUT saving: the client prefills the
 // create form so the user reviews/edits, then saves via POST /api/recipes.
 // Error contract (the client maps these to localized toasts):
@@ -22,12 +193,17 @@ router.post('/import-url', async (req: AuthRequest, res) => {
         return res.status(400).json({ success: false, error: 'url is required' });
     }
 
+    const isInsta = isInstagramUrl(cleanUrl);
+    const targetUrl = isInsta ? formatInstagramEmbedUrl(cleanUrl) : cleanUrl;
+
     let html: string;
     try {
         // Unlike LAN integrations, this route fetches the public internet:
         // private/loopback targets are ALWAYS blocked (checked on every redirect hop).
-        html = await fetchHtmlPage(cleanUrl, (target) =>
-            assertSafeIntegrationUrl(target, { blockPrivate: true })
+        html = await fetchHtmlPage(
+            targetUrl,
+            (target) => assertSafeIntegrationUrl(target, { blockPrivate: true }),
+            isInsta ? MOBILE_UA : undefined
         );
     } catch (error) {
         if (error instanceof UnsafeUrlError) {
@@ -35,6 +211,13 @@ router.post('/import-url', async (req: AuthRequest, res) => {
         }
         console.error('Recipe import fetch error:', error instanceof Error ? error.message : error);
         return res.status(502).json({ success: false, error: 'FETCH_FAILED' });
+    }
+
+    if (isInstagramUrl(cleanUrl)) {
+        const instaRecipe = parseInstagramRecipe(html);
+        if (instaRecipe) {
+            return res.json({ success: true, data: instaRecipe });
+        }
     }
 
     const node = findRecipeJsonLd(html);

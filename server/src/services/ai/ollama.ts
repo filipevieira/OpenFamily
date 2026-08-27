@@ -56,12 +56,24 @@ export async function ollamaComplete(
         throw new AiError('AI_PROVIDER_ERROR', detail || `Ollama a répondu HTTP ${response.status}`);
     }
 
-    const data = (await response.json().catch(() => null)) as { message?: { content?: string } } | null;
+    const data = (await response.json().catch(() => null)) as {
+        message?: { content?: string };
+        prompt_eval_count?: number;
+        eval_count?: number;
+    } | null;
     const content = data?.message?.content;
     if (typeof content !== 'string' || !content.trim()) {
         throw new AiError('AI_INVALID_RESPONSE', 'Réponse Ollama vide');
     }
-    return extractJson(content);
+    const result = extractJson(content);
+    const pTokens = data?.prompt_eval_count ?? 0;
+    const cTokens = data?.eval_count ?? 0;
+    result._usage = {
+        prompt_tokens: pTokens,
+        completion_tokens: cTokens,
+        total_tokens: pTokens + cTokens,
+    };
+    return result;
 }
 
 async function safeErrorText(response: Response): Promise<string> {
