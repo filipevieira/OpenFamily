@@ -81,6 +81,14 @@
       "urlPlaceholder": "https://immich.mondomaine.com",
       "keyLabel": "Clé API",
       "keyPlaceholder": "Depuis Immich > Paramètres du compte > Clés API"
+    },
+    "google_calendar": {
+      "tagline": "Google Agenda",
+      "description": "Synchronisez les rendez-vous de la famille directement avec Google Agenda.",
+      "clientIdLabel": "Client ID Google Cloud",
+      "clientIdPlaceholder": "xxxxxx.apps.googleusercontent.com",
+      "clientSecretLabel": "Client Secret Google Cloud",
+      "clientSecretPlaceholder": "GOCSPX-xxxxxx"
     }
   }
 }

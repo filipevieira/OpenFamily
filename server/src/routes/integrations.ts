@@ -9,6 +9,15 @@ import { testHomeAssistantConnection, syncHomeAssistant } from '../services/inte
 import { testGrocyConnection, syncGrocy } from '../services/integrations/grocy';
 import { testNextcloudConnection, syncNextcloud } from '../services/integrations/nextcloud';
 import { testImmichConnection, syncImmich, fetchImmichRandomPhoto } from '../services/integrations/immich';
+import {
+    generateGoogleAuthUrl,
+    exchangeCodeForTokens,
+    testGoogleCalendarConnection,
+    fetchGoogleCalendarEvents,
+    syncGoogleCalendar,
+    type GoogleCalendarConfig,
+    type GoogleOAuthTokens,
+} from '../services/integrations/googlecalendar';
 import { broadcast } from '../lib/broadcaster';
 
 const router = Router();
@@ -163,6 +172,7 @@ router.post('/:id/sync', requireParent, async (req: AuthRequest, res) => {
                 case 'grocy':         syncResult = await syncGrocy(integ.id, req.userId!, integ.base_url, integ.encrypted_credentials); break;
                 case 'nextcloud':     syncResult = await syncNextcloud(integ.id, req.userId!, integ.base_url, integ.encrypted_credentials, integ.config || {}); break;
                 case 'immich':        syncResult = await syncImmich(integ.id, req.userId!, integ.base_url, integ.encrypted_credentials); break;
+                case 'google_calendar': syncResult = await syncGoogleCalendar(integ.id, req.userId!, integ.base_url, integ.encrypted_credentials, integ.config || {}); break;
                 default: throw new Error('Type inconnu');
             }
 
@@ -180,6 +190,116 @@ router.post('/:id/sync', requireParent, async (req: AuthRequest, res) => {
         }
     } catch {
         res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+// GET /api/integrations/google/auth-url
+router.get('/google/auth-url', requireParent, async (req: AuthRequest, res) => {
+    try {
+        const { redirectUri } = req.query as { redirectUri?: string };
+        const result = await query(
+            "SELECT config FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
+            [req.userId]
+        );
+        const integ = result.rows[0] as { config?: GoogleCalendarConfig } | undefined;
+        if (!integ?.config?.client_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'GOOGLE_NOT_CONFIGURED',
+                message: 'Veuillez configurer votre Client ID et Client Secret dans les paramètres',
+            });
+        }
+
+        const effectiveRedirectUri = redirectUri || `${req.protocol}://${req.get('host')}/settings/integrations/google/callback`;
+        const authUrl = generateGoogleAuthUrl(integ.config.client_id, effectiveRedirectUri, req.userId);
+        res.json({ success: true, authUrl });
+    } catch {
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+// POST /api/integrations/google/config - Save Client ID and Client Secret
+router.post('/google/config', requireParent, async (req: AuthRequest, res) => {
+    try {
+        const { client_id, client_secret } = req.body as { client_id?: string; client_secret?: string };
+        if (!client_id || !client_secret) {
+            return res.status(400).json({ success: false, error: 'Client ID and Client Secret are required' });
+        }
+
+        const config: GoogleCalendarConfig = {
+            client_id: client_id.trim(),
+            client_secret: client_secret.trim(),
+            calendar_id: 'primary',
+            auto_sync: true,
+        };
+
+        const existing = await query(
+            "SELECT id FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
+            [req.userId]
+        );
+
+        if (existing.rows.length > 0) {
+            await query(
+                `UPDATE integrations
+                 SET config = $1, status = 'disconnected', updated_at = NOW()
+                 WHERE family_id = $2 AND type = 'google_calendar'`,
+                [JSON.stringify(config), req.userId]
+            );
+        } else {
+            await query(
+                `INSERT INTO integrations (family_id, type, display_name, base_url, config, status)
+                 VALUES ($1, 'google_calendar', 'Google Calendar', 'https://calendar.google.com', $2, 'disconnected')`,
+                [req.userId, JSON.stringify(config)]
+            );
+        }
+
+        broadcast(req.userId!, { type: 'update', entity: 'integrations', action: 'updated' });
+        res.json({ success: true });
+    } catch {
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+// GET /api/integrations/google/callback - Handle OAuth redirect code from Google
+router.get('/google/callback', async (req: AuthRequest, res) => {
+    try {
+        const { code, redirectUri } = req.query as { code?: string; redirectUri?: string };
+        if (!code) {
+            return res.status(400).json({ success: false, error: 'Authorization code missing' });
+        }
+
+        const result = await query(
+            "SELECT id, config FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
+            [req.userId]
+        );
+
+        const integ = result.rows[0] as { id: string; config?: GoogleCalendarConfig } | undefined;
+        if (!integ?.config?.client_id || !integ?.config?.client_secret) {
+            return res.status(400).json({ success: false, error: 'Google Calendar credentials not configured' });
+        }
+
+        const effectiveRedirectUri = redirectUri || `${req.protocol}://${req.get('host')}/settings/integrations/google/callback`;
+        const tokens = await exchangeCodeForTokens(
+            code,
+            integ.config.client_id,
+            integ.config.client_secret,
+            effectiveRedirectUri
+        );
+
+        const encrypted = encryptCredentials(tokens as unknown as Record<string, string>);
+
+        await query(
+            `UPDATE integrations
+             SET encrypted_credentials = $1, status = 'connected', last_error = NULL, updated_at = NOW()
+             WHERE id = $2`,
+            [encrypted, integ.id]
+        );
+
+        broadcast(req.userId!, { type: 'update', entity: 'integrations', action: 'updated' });
+        res.json({ success: true });
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : 'OAuth exchange error';
+        res.status(500).json({ success: false, error: msg });
     }
 });
 

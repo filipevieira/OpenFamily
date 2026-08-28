@@ -81,6 +81,14 @@
       "urlPlaceholder": "https://immich.meudominio.com",
       "keyLabel": "Chave de API",
       "keyPlaceholder": "Obtida em Immich > Configurações de conta > Chaves de API"
+    },
+    "google_calendar": {
+      "tagline": "Agenda do Google",
+      "description": "Sincronize os compromissos da família diretamente com o Google Calendar.",
+      "clientIdLabel": "Client ID do Google Cloud",
+      "clientIdPlaceholder": "xxxxxx.apps.googleusercontent.com",
+      "clientSecretLabel": "Client Secret do Google Cloud",
+      "clientSecretPlaceholder": "GOCSPX-xxxxxx"
     }
   }
 }

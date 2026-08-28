@@ -30,6 +30,10 @@ const BRAND_SVG: Record<string, { path: string; hex: string }> = {
         hex: '0082C9',
         path: 'M12.018 6.537c-2.5 0-4.6 1.712-5.241 4.015-.56-1.232-1.793-2.105-3.225-2.105A3.569 3.569 0 0 0 0 12a3.569 3.569 0 0 0 3.552 3.553c1.432 0 2.664-.874 3.224-2.106.641 2.304 2.742 4.016 5.242 4.016 2.487 0 4.576-1.693 5.231-3.977.569 1.21 1.783 2.067 3.198 2.067A3.568 3.568 0 0 0 24 12a3.569 3.569 0 0 0-3.553-3.553c-1.416 0-2.63.858-3.199 2.067-.654-2.284-2.743-3.978-5.23-3.977zm0 2.085c1.878 0 3.378 1.5 3.378 3.378 0 1.878-1.5 3.378-3.378 3.378A3.362 3.362 0 0 1 8.641 12c0-1.878 1.5-3.378 3.377-3.378zm-8.466 1.91c.822 0 1.467.645 1.467 1.468s-.644 1.467-1.467 1.468A1.452 1.452 0 0 1 2.085 12c0-.823.644-1.467 1.467-1.467zm16.895 0c.823 0 1.468.645 1.468 1.468s-.645 1.468-1.468 1.468A1.452 1.452 0 0 1 18.98 12c0-.823.644-1.467 1.467-1.467z',
     },
+    google_calendar: {
+        hex: '4285F4',
+        path: 'M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h5v5h-5z',
+    },
 };
 
 // For Tandoor we use the real PNG logo placed in public/
@@ -156,6 +160,17 @@ const Integrations: React.FC = () => {
                 { key: 'apiKey', label: t('integrations:catalog.immich.keyLabel'), placeholder: t('integrations:catalog.immich.keyPlaceholder'), type: 'password' },
             ],
         },
+        {
+            id: 'google_calendar',
+            name: 'Google Calendar',
+            tagline: t('integrations:catalog.google_calendar.tagline', 'Sincronização bidirecional de compromissos da família'),
+            description: t('integrations:catalog.google_calendar.description', 'Conecte sua conta do Google para sincronizar os eventos do calendário com o OpenFamily.'),
+            syncs: [t('integrations:syncs.calendar', 'Calendrier'), t('integrations:syncs.appointments', 'Rendez-vous')],
+            fields: [
+                { key: 'client_id', label: 'Client ID', placeholder: 'xxxxxx.apps.googleusercontent.com', type: 'text' },
+                { key: 'client_secret', label: 'Client Secret', placeholder: 'GOCSPX-xxxxxx', type: 'password' },
+            ],
+        },
     ];
     const [integrations, setIntegrations] = useState<Integration[]>([]);
     const [loading, setLoading] = useState(true);
@@ -210,6 +225,19 @@ const Integrations: React.FC = () => {
         if (!activeModal) return;
         setSaving(true);
         try {
+            if (activeModal === 'google_calendar') {
+                await api.post('/api/integrations/google/config', {
+                    client_id: formValues.client_id,
+                    client_secret: formValues.client_secret,
+                });
+                const redirectUri = `${window.location.origin}/settings/integrations/google/callback`;
+                const res = await api.get<{ success: boolean; authUrl: string }>(`/api/integrations/google/auth-url?redirectUri=${encodeURIComponent(redirectUri)}`);
+                if (res.success && res.authUrl) {
+                    window.location.href = res.authUrl;
+                    return;
+                }
+            }
+
             const res = await api.post<{ success: boolean; data: Integration }>('/api/integrations', {
                 type: activeModal,
                 ...formValues,
