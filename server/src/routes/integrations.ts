@@ -14,6 +14,8 @@ import {
     exchangeCodeForTokens,
     testGoogleCalendarConnection,
     fetchGoogleCalendarEvents,
+    fetchUserCalendars,
+    getValidAccessToken,
     syncGoogleCalendar,
     type GoogleCalendarConfig,
     type GoogleOAuthTokens,
@@ -299,6 +301,30 @@ router.get('/google/callback', async (req: AuthRequest, res) => {
         res.json({ success: true });
     } catch (error) {
         const msg = error instanceof Error ? error.message : 'OAuth exchange error';
+        res.status(500).json({ success: false, error: msg });
+    }
+});
+
+// GET /api/integrations/google/calendars - Fetch list of user's Google Calendars
+router.get('/google/calendars', async (req: AuthRequest, res) => {
+    try {
+        const { accessToken } = await getValidAccessToken('', req.userId!);
+        const calendars = await fetchUserCalendars(accessToken);
+        res.json({ success: true, calendars });
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Failed to fetch Google Calendars';
+        res.status(500).json({ success: false, error: msg });
+    }
+});
+
+// POST /api/integrations/google/clean - Safely wipe local schedule entries for clean start
+router.post('/google/clean', requireParent, async (req: AuthRequest, res) => {
+    try {
+        await query('DELETE FROM schedule_entries WHERE user_id = $1', [req.userId]);
+        broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'deleted' });
+        res.json({ success: true, message: 'Local schedule entries safely wiped' });
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Failed to wipe local entries';
         res.status(500).json({ success: false, error: msg });
     }
 });

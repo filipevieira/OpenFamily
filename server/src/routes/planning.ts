@@ -3,6 +3,12 @@ import { getClient, query } from '../db';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { toNullIfEmpty } from '../lib/normalize';
 import { broadcast } from '../lib/broadcaster';
+import {
+    getValidAccessToken,
+    createGoogleCalendarEvent,
+    updateGoogleCalendarEvent,
+    deleteGoogleCalendarEvent,
+} from '../services/integrations/googlecalendar';
 
 const router = Router();
 router.use(authMiddleware);
@@ -320,6 +326,22 @@ router.post('/', async (req: AuthRequest, res) => {
         );
 
         await replaceParticipants(query, inserted.rows[0].id, participantIds);
+
+        // Trigger instant Google Calendar creation if connected
+        try {
+            const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
+            const gres = await createGoogleCalendarEvent(accessToken, calendarId, {
+                title: cleanedTitle,
+                location: (toNullIfEmpty(location) as string | undefined) || undefined,
+                notes: (toNullIfEmpty(notes) as string | undefined) || undefined,
+                specificDate: specificDate || undefined,
+                startTime,
+                endTime,
+            });
+            if (gres.googleEventId) {
+                await query("UPDATE schedule_entries SET google_event_id = $1, sync_source = 'google' WHERE id = $2", [gres.googleEventId, inserted.rows[0].id]);
+            }
+        } catch {}
 
         const row = await getEntryById(inserted.rows[0].id, req.userId!);
         broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'created' });
@@ -666,6 +688,22 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
         await replaceParticipants(query, id, participantIds);
 
+        // Trigger instant Google Calendar update if connected
+        try {
+            const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
+            const gEventId = current.google_event_id;
+            if (gEventId) {
+                await updateGoogleCalendarEvent(accessToken, calendarId, gEventId, {
+                    title: cleanedTitle,
+                    location: (req.body.location !== undefined ? toNullIfEmpty(req.body.location) : current.location) || undefined,
+                    notes: (req.body.notes !== undefined ? toNullIfEmpty(req.body.notes) : current.notes) || undefined,
+                    specificDate: specificDate || undefined,
+                    startTime,
+                    endTime,
+                });
+            }
+        } catch {}
+
         const row = await getEntryById(id, req.userId!);
         broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'updated' });
         return res.json({ success: true, data: mapEntryRow(row) });
@@ -688,6 +726,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
 router.delete('/:id', async (req: AuthRequest, res) => {
     try {
         const { id } = req.params;
+
+        const existing = await query('SELECT google_event_id FROM schedule_entries WHERE id = $1 AND user_id = $2', [id, req.userId]);
+        const gEventId = existing.rows[0]?.google_event_id;
+
         const result = await query(
             'DELETE FROM schedule_entries WHERE id = $1 AND user_id = $2 RETURNING id',
             [id, req.userId]
@@ -695,6 +737,13 @@ router.delete('/:id', async (req: AuthRequest, res) => {
 
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Planning entry not found' });
+        }
+
+        if (gEventId) {
+            try {
+                const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
+                await deleteGoogleCalendarEvent(accessToken, calendarId, gEventId);
+            } catch {}
         }
 
         broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'deleted' });

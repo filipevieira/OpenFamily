@@ -140,6 +140,9 @@ export const runMigrations = async () => {
         'ALTER TABLE schedule_entries DROP CONSTRAINT IF EXISTS schedule_entries_check',
         'ALTER TABLE schedule_entries ADD COLUMN IF NOT EXISTS specific_date DATE',
         'ALTER TABLE schedule_entries ADD COLUMN IF NOT EXISTS location TEXT',
+        'ALTER TABLE schedule_entries ADD COLUMN IF NOT EXISTS google_event_id VARCHAR(255)',
+        "ALTER TABLE schedule_entries ADD COLUMN IF NOT EXISTS sync_source VARCHAR(30) DEFAULT 'local'",
+        'CREATE INDEX IF NOT EXISTS idx_schedule_entries_google_id ON schedule_entries(google_event_id)',
         // Migration 002: family account sharing
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS family_owner_id UUID REFERENCES users(id) ON DELETE SET NULL',
         `CREATE TABLE IF NOT EXISTS family_invites (

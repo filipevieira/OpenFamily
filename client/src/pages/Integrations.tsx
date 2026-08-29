@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { CheckCircle2, AlertCircle, RefreshCw, Unplug, Plug, X, Clock } from 'lucide-react';
+import { CheckCircle2, AlertCircle, RefreshCw, Unplug, Plug, X, Clock, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { intlLocale } from '../i18n/format';
 
@@ -330,6 +330,24 @@ const Integrations: React.FC = () => {
                                         )}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
+                                        {item.id === 'google_calendar' && (
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (!confirm('Deseja limpar todos os eventos locais antigos do OpenFamily para iniciar do zero com o Google Calendar? (Seu Google não será afetado)')) return;
+                                                    try {
+                                                        await api.post('/api/integrations/google/clean', {});
+                                                        alert('Eventos locais limpos com sucesso!');
+                                                    } catch {
+                                                        alert('Erro ao limpar eventos locais.');
+                                                    }
+                                                }}
+                                                title="Limpar compromissos locais antigos (Iniciar do zero)"
+                                                className="p-2 rounded-input text-muted-foreground hover:bg-danger/10 hover:text-danger transition-colors flex items-center gap-1 text-micro font-medium"
+                                            >
+                                                <Trash2 className="h-4 w-4 text-danger" />
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => handleSync(integ.id)}

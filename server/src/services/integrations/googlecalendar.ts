@@ -29,8 +29,17 @@ export interface GoogleCalendarConfig {
     client_id: string;
     client_secret: string;
     calendar_id?: string;
+    calendar_title?: string;
     sync_direction?: 'bidirectional' | 'import_only' | 'export_only';
     auto_sync?: boolean;
+}
+
+export interface GoogleCalendarListEntry {
+    id: string;
+    summary: string;
+    description?: string;
+    primary?: boolean;
+    accessRole?: string;
 }
 
 export interface GoogleCalendarEvent {
@@ -130,7 +139,7 @@ export async function refreshGoogleAccessToken(
     return data;
 }
 
-/** Test connection by retrieving user's primary calendar metadata or calendar list. */
+/** Test connection by retrieving user's primary calendar metadata. */
 export async function testGoogleCalendarConnection(
     accessToken: string
 ): Promise<{ success: boolean; calendarTitle?: string; error?: string }> {
@@ -152,6 +161,57 @@ export async function testGoogleCalendarConnection(
     } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
+}
+
+/** Get valid access token for integration, refreshing if expired. */
+export async function getValidAccessToken(integrationId: string, familyId: string): Promise<{ accessToken: string; calendarId: string }> {
+    const result = await query(
+        `SELECT id, config, encrypted_credentials FROM integrations WHERE family_id = $1 AND type = 'google_calendar'`,
+        [familyId]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].encrypted_credentials) {
+        throw new Error('Google Calendar integration not connected');
+    }
+
+    const integ = result.rows[0];
+    const config = (integ.config || {}) as GoogleCalendarConfig;
+    const calendarId = config.calendar_id || 'primary';
+    const tokens = decryptCredentials(integ.encrypted_credentials) as unknown as GoogleOAuthTokens;
+
+    let accessToken = tokens.access_token;
+    if (tokens.expiry_date && Date.now() >= tokens.expiry_date - 60_000 && tokens.refresh_token) {
+        if (config.client_id && config.client_secret) {
+            const newTokens = await refreshGoogleAccessToken(
+                tokens.refresh_token,
+                config.client_id,
+                config.client_secret
+            );
+            accessToken = newTokens.access_token;
+            const updatedEncrypted = encryptCredentials(newTokens as unknown as Record<string, string>);
+            await query('UPDATE integrations SET encrypted_credentials = $1 WHERE id = $2', [updatedEncrypted, integ.id]);
+        }
+    }
+
+    return { accessToken, calendarId };
+}
+
+/** Fetch list of all calendars accessible by the user. */
+export async function fetchUserCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
+    await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
+
+    const response = await safeFetch(`${GOOGLE_CALENDAR_API_BASE}/users/me/calendarList`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeoutMs: 15_000,
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to list Google Calendars: HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as { items?: GoogleCalendarListEntry[] };
+    return data.items || [];
 }
 
 /** Fetch upcoming events from Google Calendar. */
@@ -191,6 +251,103 @@ export async function fetchGoogleCalendarEvents(
     return data.items || [];
 }
 
+/** Create event on Google Calendar. */
+export async function createGoogleCalendarEvent(
+    accessToken: string,
+    calendarId: string,
+    event: { title: string; location?: string; notes?: string; specificDate?: string; startTime?: string; endTime?: string }
+): Promise<{ googleEventId: string }> {
+    await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
+
+    const dateStr = event.specificDate || new Date().toISOString().split('T')[0];
+    const startIso = `${dateStr}T${event.startTime || '09:00:00'}`;
+    const endIso = `${dateStr}T${event.endTime || '10:00:00'}`;
+
+    const body = {
+        summary: event.title,
+        location: event.location || undefined,
+        description: event.notes || undefined,
+        start: { dateTime: new Date(startIso).toISOString() },
+        end: { dateTime: new Date(endIso).toISOString() },
+    };
+
+    const response = await safeFetch(`${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        timeoutMs: 15_000,
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        logger.error('google_calendar.create_event_failed', { status: response.status, errText });
+        throw new Error(`Failed to create Google Calendar event: HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as { id: string };
+    return { googleEventId: data.id };
+}
+
+/** Update event on Google Calendar. */
+export async function updateGoogleCalendarEvent(
+    accessToken: string,
+    calendarId: string,
+    googleEventId: string,
+    event: { title: string; location?: string; notes?: string; specificDate?: string; startTime?: string; endTime?: string }
+): Promise<void> {
+    await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
+
+    const dateStr = event.specificDate || new Date().toISOString().split('T')[0];
+    const startIso = `${dateStr}T${event.startTime || '09:00:00'}`;
+    const endIso = `${dateStr}T${event.endTime || '10:00:00'}`;
+
+    const body = {
+        summary: event.title,
+        location: event.location || undefined,
+        description: event.notes || undefined,
+        start: { dateTime: new Date(startIso).toISOString() },
+        end: { dateTime: new Date(endIso).toISOString() },
+    };
+
+    const url = `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`;
+    const response = await safeFetch(url, {
+        method: 'PATCH',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        timeoutMs: 15_000,
+    });
+
+    if (!response.ok) {
+        logger.error('google_calendar.update_event_failed', { status: response.status });
+    }
+}
+
+/** Delete event from Google Calendar. */
+export async function deleteGoogleCalendarEvent(
+    accessToken: string,
+    calendarId: string,
+    googleEventId: string
+): Promise<void> {
+    await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
+
+    const url = `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`;
+    const response = await safeFetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeoutMs: 15_000,
+    });
+
+    if (!response.ok && response.status !== 404 && response.status !== 410) {
+        logger.error('google_calendar.delete_event_failed', { status: response.status });
+    }
+}
+
 /** Sync Google Calendar events to OpenFamily schedule entries / appointments. */
 export async function syncGoogleCalendar(
     integrationId: string,
@@ -222,7 +379,8 @@ export async function syncGoogleCalendar(
         }
     }
 
-    const events = await fetchGoogleCalendarEvents(accessToken, (config.calendar_id as string) || 'primary');
+    const targetCalendarId = (config.calendar_id as string) || 'primary';
+    const events = await fetchGoogleCalendarEvents(accessToken, targetCalendarId);
     let imported = 0;
     let errors = 0;
 
@@ -230,11 +388,15 @@ export async function syncGoogleCalendar(
         try {
             if (!event.summary || !event.start) continue;
 
+            // Ignore cancelled events
+            if (event.status === 'cancelled') {
+                await query('DELETE FROM schedule_entries WHERE user_id = $1 AND google_event_id = $2', [familyId, event.id]);
+                continue;
+            }
+
             const title = event.summary.slice(0, 255);
             const location = event.location ? event.location.slice(0, 255) : null;
-            const userNotes = event.description ? event.description.slice(0, 450) : '';
-            const gcalMarker = `[gcal:${event.id}]`;
-            const fullNotes = userNotes ? `${userNotes}\n${gcalMarker}` : gcalMarker;
+            const notes = event.description ? event.description.slice(0, 500) : null;
 
             // Handle date vs dateTime
             let specificDate: string | null = null;
@@ -259,20 +421,20 @@ export async function syncGoogleCalendar(
                 }
             }
 
-            // Check if entry already exists by matching title + date OR Google Event ID marker in notes
+            // Check if entry already exists by matching google_event_id OR title+date
             const existing = await query(
-                `SELECT id FROM schedule_entries WHERE user_id = $1 AND (notes LIKE $2 OR (title = $3 AND specific_date = $4))`,
-                [familyId, `%${gcalMarker}%`, title, specificDate]
+                `SELECT id FROM schedule_entries WHERE user_id = $1 AND (google_event_id = $2 OR (title = $3 AND specific_date = $4))`,
+                [familyId, event.id, title, specificDate]
             );
 
             if (existing.rows.length > 0) {
-                // Update existing event details in OpenFamily (time, location, notes, title)
+                // Update existing event details in OpenFamily
                 const existingId = existing.rows[0].id;
                 await query(
                     `UPDATE schedule_entries
-                     SET title = $1, start_time = $2, end_time = $3, specific_date = $4, location = $5, notes = $6, updated_at = NOW()
-                     WHERE id = $7`,
-                    [title, startTime, endTime, specificDate, location, fullNotes, existingId]
+                     SET title = $1, start_time = $2, end_time = $3, specific_date = $4, location = $5, notes = $6, google_event_id = $7, sync_source = 'google', updated_at = NOW()
+                     WHERE id = $8`,
+                    [title, startTime, endTime, specificDate, location, notes, event.id, existingId]
                 );
             } else {
                 // Insert new event
@@ -282,9 +444,9 @@ export async function syncGoogleCalendar(
                 if (memberId) {
                     await query(
                         `INSERT INTO schedule_entries
-                         (user_id, family_member_id, schedule_type, title, day_of_week, start_time, end_time, specific_date, location, notes)
-                         VALUES ($1, $2, 'other', $3, $4, $5, $6, $7, $8, $9)`,
-                        [familyId, memberId, title, dayOfWeek, startTime, endTime, specificDate, location, fullNotes]
+                         (user_id, family_member_id, schedule_type, title, day_of_week, start_time, end_time, specific_date, location, notes, google_event_id, sync_source)
+                         VALUES ($1, $2, 'other', $3, $4, $5, $6, $7, $8, $9, $10, 'google')`,
+                        [familyId, memberId, title, dayOfWeek, startTime, endTime, specificDate, location, notes, event.id]
                     );
                     imported++;
                 }
