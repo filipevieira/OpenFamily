@@ -202,6 +202,8 @@ const mapEntryRow = (row: any) => ({
     specific_date: row.specific_date ? (typeof row.specific_date === 'string' ? row.specific_date.slice(0, 10) : row.specific_date.toISOString().slice(0, 10)) : null,
     location: row.location,
     notes: row.notes,
+    google_event_id: row.google_event_id,
+    sync_source: row.sync_source || 'local',
     created_at: row.created_at,
     updated_at: row.updated_at,
 });

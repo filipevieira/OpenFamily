@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { CheckCircle2, AlertCircle, RefreshCw, Unplug, Plug, X, Clock, Trash2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, RefreshCw, Unplug, Plug, X, Clock, Trash2, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { intlLocale } from '../i18n/format';
 
@@ -36,7 +36,6 @@ const BRAND_SVG: Record<string, { path: string; hex: string }> = {
     },
 };
 
-// For Tandoor we use the real PNG logo placed in public/
 const IMG_ICONS: Record<string, string> = {
     tandoor: `${import.meta.env.BASE_URL}tandoor.png`,
 };
@@ -67,6 +66,7 @@ interface Integration {
     type: string;
     display_name: string;
     base_url: string;
+    config?: Record<string, unknown>;
     status: 'connected' | 'syncing' | 'error';
     last_synced_at: string | null;
     last_error: string | null;
@@ -172,6 +172,7 @@ const Integrations: React.FC = () => {
             ],
         },
     ];
+
     const [integrations, setIntegrations] = useState<Integration[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -180,6 +181,9 @@ const Integrations: React.FC = () => {
     const [testing, setTesting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [syncingId, setSyncingId] = useState<string | null>(null);
+    const [userCalendars, setUserCalendars] = useState<Array<{ id: string; summary: string; primary?: boolean }>>([]);
+    const [loadingCalendars, setLoadingCalendars] = useState(false);
+    const [showCalendarSelector, setShowCalendarSelector] = useState(false);
 
     useEffect(() => { void load(); }, []);
 
@@ -188,7 +192,39 @@ const Integrations: React.FC = () => {
             const res = await api.get<{ success: boolean; data: Integration[] }>('/api/integrations');
             if (res.success) setIntegrations(res.data);
         } finally {
+            setLoadingCalendars(false);
             setLoading(false);
+        }
+    };
+
+    const loadCalendars = async () => {
+        setLoadingCalendars(true);
+        try {
+            const res = await api.get<{ success: boolean; calendars: Array<{ id: string; summary: string; primary?: boolean }> }>('/api/integrations/google/calendars');
+            if (res.success && res.calendars) {
+                setUserCalendars(res.calendars);
+                setShowCalendarSelector(true);
+            }
+        } catch {
+            alert('Não foi possível carregar a lista de agendas do Google.');
+        } finally {
+            setLoadingCalendars(false);
+        }
+    };
+
+    const selectCalendar = async (calId: string, calSummary: string, integ: Integration) => {
+        try {
+            const currentConfig = (integ.config as Record<string, unknown>) || {};
+            await api.post('/api/integrations/google/config', {
+                ...currentConfig,
+                calendar_id: calId,
+                calendar_title: calSummary,
+            });
+            alert(`Agenda "${calSummary}" vinculada com sucesso!`);
+            setShowCalendarSelector(false);
+            void load();
+        } catch {
+            alert('Erro ao vincular a agenda selecionada.');
         }
     };
 
@@ -327,6 +363,19 @@ const Integrations: React.FC = () => {
                                                 <Clock className="h-3 w-3" />
                                                 {t('integrations:lastSync', { date: fmtDate(integ.last_synced_at) })}
                                             </p>
+                                        )}
+                                        {item.id === 'google_calendar' && (
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={loadCalendars}
+                                                    disabled={loadingCalendars}
+                                                    className="text-micro px-2 py-1 rounded border border-primary/40 bg-primary/10 text-primary font-medium hover:bg-primary/20 transition-colors flex items-center gap-1"
+                                                >
+                                                    <Calendar className="h-3 w-3" />
+                                                    {(integ.config as any)?.calendar_title ? `Agenda: ${(integ.config as any).calendar_title}` : 'Selecionar Agenda do Google'}
+                                                </button>
+                                            </div>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
@@ -502,6 +551,44 @@ const Integrations: React.FC = () => {
                     </div>
                 );
             })()}
+
+            {showCalendarSelector && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCalendarSelector(false)} />
+                    <Card className="relative w-full max-w-md shadow-lg" hover={false}>
+                        <CardHeader className="pb-4">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="font-serif text-h2 flex items-center gap-2">
+                                    <Calendar className="h-5 w-5 text-primary" />
+                                    Selecionar Agenda do Google
+                                </CardTitle>
+                                <button type="button" onClick={() => setShowCalendarSelector(false)} className="p-1.5 rounded-input text-muted-foreground hover:bg-surface-2">
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <p className="text-caption text-muted-foreground mt-1">
+                                Escolha a agenda da sua conta Google para sincronizar com o OpenFamily (ex: "Calendário da Família"):
+                            </p>
+                        </CardHeader>
+                        <CardContent className="space-y-2 max-h-80 overflow-y-auto">
+                            {userCalendars.map((cal) => (
+                                <button
+                                    key={cal.id}
+                                    type="button"
+                                    onClick={() => selectCalendar(cal.id, cal.summary, connectedMap.get('google_calendar')!)}
+                                    className="w-full p-3 rounded-card border border-border bg-surface-1 hover:bg-surface-2 hover:border-primary/40 text-left flex items-center justify-between transition-colors font-medium text-foreground"
+                                >
+                                    <div>
+                                        <p className="text-body font-semibold text-foreground">{cal.summary}</p>
+                                        {cal.primary && <span className="text-micro text-primary font-medium">Agenda Principal</span>}
+                                    </div>
+                                    <Plug className="h-4 w-4 text-muted-foreground" />
+                                </button>
+                            ))}
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
         </div>
     );
 };

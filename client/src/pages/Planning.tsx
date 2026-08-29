@@ -58,6 +58,8 @@ interface PlanningEntry {
     specific_date?: string | null;
     location?: string;
     notes?: string;
+    google_event_id?: string | null;
+    sync_source?: string | null;
 }
 
 /** An appointment shown alongside the planning, read-only. */
@@ -692,6 +694,11 @@ const Planning: React.FC = () => {
                                                                 ? <Pin className="mr-0.5 h-2.5 w-2.5 text-amber-500" />
                                                                 : <Repeat className="mr-0.5 h-2.5 w-2.5 text-muted-foreground/50" />
                                                             }
+                                                            {entry.google_event_id ? (
+                                                                <span title="Google Calendar" className="mr-1 text-[10px]">🗓️</span>
+                                                            ) : (
+                                                                <span title="Local (OpenFamily)" className="mr-1 text-[10px]">🏠</span>
+                                                            )}
                                                             {isSeries && (
                                                                 <button
                                                                     type="button"
