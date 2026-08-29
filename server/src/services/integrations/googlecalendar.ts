@@ -232,7 +232,9 @@ export async function syncGoogleCalendar(
 
             const title = event.summary.slice(0, 255);
             const location = event.location ? event.location.slice(0, 255) : null;
-            const notes = event.description ? event.description.slice(0, 500) : null;
+            const userNotes = event.description ? event.description.slice(0, 450) : '';
+            const gcalMarker = `[gcal:${event.id}]`;
+            const fullNotes = userNotes ? `${userNotes}\n${gcalMarker}` : gcalMarker;
 
             // Handle date vs dateTime
             let specificDate: string | null = null;
@@ -257,14 +259,23 @@ export async function syncGoogleCalendar(
                 }
             }
 
-            // Check for existing entry by title and specific_date to prevent duplicate spam
+            // Check if entry already exists by matching title + date OR Google Event ID marker in notes
             const existing = await query(
-                `SELECT id FROM schedule_entries WHERE user_id = $1 AND title = $2 AND specific_date = $3`,
-                [familyId, title, specificDate]
+                `SELECT id FROM schedule_entries WHERE user_id = $1 AND (notes LIKE $2 OR (title = $3 AND specific_date = $4))`,
+                [familyId, `%${gcalMarker}%`, title, specificDate]
             );
 
-            if (existing.rows.length === 0) {
-                // Fetch family member ID for user
+            if (existing.rows.length > 0) {
+                // Update existing event details in OpenFamily (time, location, notes, title)
+                const existingId = existing.rows[0].id;
+                await query(
+                    `UPDATE schedule_entries
+                     SET title = $1, start_time = $2, end_time = $3, specific_date = $4, location = $5, notes = $6, updated_at = NOW()
+                     WHERE id = $7`,
+                    [title, startTime, endTime, specificDate, location, fullNotes, existingId]
+                );
+            } else {
+                // Insert new event
                 const memberRes = await query('SELECT id FROM family_members WHERE user_id = $1 LIMIT 1', [familyId]);
                 const memberId = memberRes.rows[0]?.id;
 
@@ -273,7 +284,7 @@ export async function syncGoogleCalendar(
                         `INSERT INTO schedule_entries
                          (user_id, family_member_id, schedule_type, title, day_of_week, start_time, end_time, specific_date, location, notes)
                          VALUES ($1, $2, 'other', $3, $4, $5, $6, $7, $8, $9)`,
-                        [familyId, memberId, title, dayOfWeek, startTime, endTime, specificDate, location, notes]
+                        [familyId, memberId, title, dayOfWeek, startTime, endTime, specificDate, location, fullNotes]
                     );
                     imported++;
                 }
