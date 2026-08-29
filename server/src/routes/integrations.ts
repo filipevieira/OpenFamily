@@ -296,6 +296,20 @@ router.post('/google/select-calendar', requireParent, async (req: AuthRequest, r
             [JSON.stringify(updatedConfig), req.userId]
         );
 
+        // Immediately trigger sync in background for the newly selected calendar
+        if (existing.rows[0].encrypted_credentials) {
+            void syncGoogleCalendar(
+                existing.rows[0].id,
+                req.userId!,
+                existing.rows[0].base_url || 'https://calendar.google.com',
+                existing.rows[0].encrypted_credentials,
+                updatedConfig as unknown as Record<string, unknown>
+            ).then(() => {
+                broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'updated' });
+                broadcast(req.userId!, { type: 'update', entity: 'appointments', action: 'updated' });
+            }).catch(() => {});
+        }
+
         broadcast(req.userId!, { type: 'update', entity: 'integrations', action: 'updated' });
         res.json({ success: true, calendar_id, calendar_title });
     } catch (err) {
