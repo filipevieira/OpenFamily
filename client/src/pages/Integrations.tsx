@@ -212,11 +212,9 @@ const Integrations: React.FC = () => {
         }
     };
 
-    const selectCalendar = async (calId: string, calSummary: string, integ: Integration) => {
+    const selectCalendar = async (calId: string, calSummary: string) => {
         try {
-            const currentConfig = (integ.config as Record<string, unknown>) || {};
-            await api.post('/api/integrations/google/config', {
-                ...currentConfig,
+            await api.post('/api/integrations/google/select-calendar', {
                 calendar_id: calId,
                 calendar_title: calSummary,
             });
@@ -575,7 +573,7 @@ const Integrations: React.FC = () => {
                                 <button
                                     key={cal.id}
                                     type="button"
-                                    onClick={() => selectCalendar(cal.id, cal.summary, connectedMap.get('google_calendar')!)}
+                                    onClick={() => selectCalendar(cal.id, cal.summary)}
                                     className="w-full p-3 rounded-card border border-border bg-surface-1 hover:bg-surface-2 hover:border-primary/40 text-left flex items-center justify-between transition-colors font-medium text-foreground"
                                 >
                                     <div>

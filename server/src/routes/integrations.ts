@@ -228,22 +228,25 @@ router.post('/google/config', requireParent, async (req: AuthRequest, res) => {
             return res.status(400).json({ success: false, error: 'Client ID and Client Secret are required' });
         }
 
-        const config: GoogleCalendarConfig = {
-            client_id: client_id.trim(),
-            client_secret: client_secret.trim(),
-            calendar_id: 'primary',
-            auto_sync: true,
-        };
-
         const existing = await query(
-            "SELECT id FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
+            "SELECT id, config FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
             [req.userId]
         );
+
+        const existingConfig = (existing.rows[0]?.config || {}) as GoogleCalendarConfig;
+
+        const config: GoogleCalendarConfig = {
+            ...existingConfig,
+            client_id: client_id.trim(),
+            client_secret: client_secret.trim(),
+            calendar_id: existingConfig.calendar_id || 'primary',
+            auto_sync: true,
+        };
 
         if (existing.rows.length > 0) {
             await query(
                 `UPDATE integrations
-                 SET config = $1, status = 'disconnected', updated_at = NOW()
+                 SET config = $1, updated_at = NOW()
                  WHERE family_id = $2 AND type = 'google_calendar'`,
                 [JSON.stringify(config), req.userId]
             );
@@ -259,6 +262,45 @@ router.post('/google/config', requireParent, async (req: AuthRequest, res) => {
         res.json({ success: true });
     } catch {
         res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+// POST /api/integrations/google/select-calendar - Select active Google Calendar
+router.post('/google/select-calendar', requireParent, async (req: AuthRequest, res) => {
+    try {
+        const { calendar_id, calendar_title } = req.body as { calendar_id?: string; calendar_title?: string };
+        if (!calendar_id) {
+            return res.status(400).json({ success: false, error: 'calendar_id is required' });
+        }
+
+        const existing = await query(
+            "SELECT id, config FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
+            [req.userId]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Google Calendar integration not found' });
+        }
+
+        const currentConfig = (existing.rows[0].config || {}) as GoogleCalendarConfig;
+        const updatedConfig: GoogleCalendarConfig = {
+            ...currentConfig,
+            calendar_id: calendar_id,
+            calendar_title: calendar_title || calendar_id,
+        };
+
+        await query(
+            `UPDATE integrations
+             SET config = $1, updated_at = NOW()
+             WHERE family_id = $2 AND type = 'google_calendar'`,
+            [JSON.stringify(updatedConfig), req.userId]
+        );
+
+        broadcast(req.userId!, { type: 'update', entity: 'integrations', action: 'updated' });
+        res.json({ success: true, calendar_id, calendar_title });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to select calendar';
+        res.status(500).json({ success: false, error: msg });
     }
 });
 
