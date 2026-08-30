@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
     Calendar, UtensilsCrossed, CheckSquare, Users, Maximize2, Minimize2, X, MapPin,
-    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe,
+    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe, Download,
     Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -31,7 +31,7 @@ const hhmm = (iso: string) => new Intl.DateTimeFormat(intlLocale(), { hour: '2-d
 // ── Per-device kiosk settings (localStorage — the right scope for a wall display) ──
 
 interface KioskLocation { name: string; lat: number; lon: number }
-interface KioskSettings { location: KioskLocation | null; photoBackground: boolean }
+interface KioskSettings { location: KioskLocation | null; photoBackground: boolean; darkMode: boolean }
 
 const SETTINGS_KEY = 'openfamily.kioskSettings';
 
@@ -44,10 +44,11 @@ const loadKioskSettings = (): KioskSettings => {
             return {
                 location: loc && typeof loc.lat === 'number' && typeof loc.lon === 'number' && typeof loc.name === 'string' ? loc : null,
                 photoBackground: Boolean(parsed.photoBackground),
+                darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : true,
             };
         }
     } catch { /* corrupted settings → defaults */ }
-    return { location: null, photoBackground: false };
+    return { location: null, photoBackground: false, darkMode: true };
 };
 
 // ── Weather (Open-Meteo, no API key, public CORS — also works in the static demo) ──
@@ -161,6 +162,18 @@ const Kiosk: React.FC = () => {
     const [doneShopping, setDoneShopping] = useState<{ id: string; name: string }[]>([]);
     const [dismissedNotes, setDismissedNotes] = useState<{ id: string; content: string }[]>([]);
     const noteTimers = useRef(new Map<string, number>());
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch { /* storage full */ }
+
+        if (settings.darkMode) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    }, [settings]);
 
     // Live clock (updates every 15s — enough to flip the minute)
     useEffect(() => {
@@ -744,6 +757,31 @@ const Kiosk: React.FC = () => {
                             </button>
                         </div>
 
+                        {/* Dark Mode toggle */}
+                        <div className="mt-4 flex items-start justify-between gap-4">
+                            <div>
+                                <p className="text-caption font-medium flex items-center gap-1.5">
+                                    <Moon className="h-4 w-4 text-primary" /> Modo Escuro (Dark Mode)
+                                </p>
+                                <p className="mt-0.5 text-micro text-muted-foreground">Recomendado para telas de TV e visibilidade noturna</p>
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={settings.darkMode}
+                                onClick={() => setSettings((s) => ({ ...s, darkMode: !s.darkMode }))}
+                                className={cn(
+                                    'relative h-7 w-12 shrink-0 rounded-full transition-colors',
+                                    settings.darkMode ? 'bg-primary' : 'border border-border bg-surface-2'
+                                )}
+                            >
+                                <span className={cn(
+                                    'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all',
+                                    settings.darkMode ? 'left-6' : 'left-1'
+                                )} />
+                            </button>
+                        </div>
+
                         {/* Kiosk TV Link section */}
                         <div className="mt-6 border-t border-border pt-5">
                             <div className="flex items-center justify-between gap-3 mb-2">
@@ -781,6 +819,13 @@ const Kiosk: React.FC = () => {
                                     </button>
                                 </div>
                             )}
+                            <a
+                                href="/OpenFamily-TV.apk"
+                                download
+                                className="flex items-center justify-center gap-2 w-full mt-3 py-2 rounded-input border border-primary/40 bg-primary/10 text-primary font-semibold text-caption hover:bg-primary/20 transition-colors"
+                            >
+                                <Download className="h-4 w-4" /> Baixar App Android TV (APK)
+                            </a>
                         </div>
 
                         {/* Language Selector */}
