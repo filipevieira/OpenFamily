@@ -4,9 +4,8 @@ import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { CheckCircle2, AlertCircle, RefreshCw, Unplug, Plug, X, Clock, Trash2, Calendar } from 'lucide-react';
+import { CheckCircle2, AlertCircle, RefreshCw, Unplug, Trash2, Calendar, X } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { intlLocale } from '../i18n/format';
 
 // Brand SVG icons (Simple Icons paths, viewBox 0 0 24 24)
 const BRAND_SVG: Record<string, { path: string; hex: string }> = {
@@ -40,7 +39,7 @@ const IMG_ICONS: Record<string, string> = {
     tandoor: `${import.meta.env.BASE_URL}tandoor.png`,
 };
 
-function BrandIcon({ id, size = 20 }: { id: string; size?: number }) {
+const BrandIcon: React.FC<{ id: string; size?: number }> = ({ id, size = 20 }) => {
     if (IMG_ICONS[id]) {
         return (
             <img
@@ -59,7 +58,7 @@ function BrandIcon({ id, size = 20 }: { id: string; size?: number }) {
             <path d={icon.path} />
         </svg>
     );
-}
+};
 
 interface Integration {
     id: string;
@@ -88,6 +87,13 @@ interface CatalogItem {
     syncs: string[];
     fields: FieldDef[];
 }
+
+const statusBadge = (status: string) => {
+    if (status === 'error') {
+        return <span className="inline-flex items-center gap-1 text-micro text-danger"><AlertCircle className="h-3 w-3" /> Erro</span>;
+    }
+    return <span className="inline-flex items-center gap-1 text-micro text-success"><CheckCircle2 className="h-3 w-3" /> Conectado</span>;
+};
 
 const Integrations: React.FC = () => {
     const { t } = useTranslation(['integrations', 'common']);
@@ -119,11 +125,10 @@ const Integrations: React.FC = () => {
             name: 'Home Assistant',
             tagline: t('integrations:catalog.homeassistant.tagline'),
             description: t('integrations:catalog.homeassistant.description'),
-            syncs: [t('integrations:syncs.shopping')],
+            syncs: [t('integrations:syncs.calendar'), t('integrations:syncs.shopping')],
             fields: [
                 { key: 'base_url', label: t('integrations:catalog.homeassistant.urlLabel'), placeholder: t('integrations:catalog.homeassistant.urlPlaceholder'), type: 'url' },
-                { key: 'token', label: t('integrations:catalog.homeassistant.tokenLabel'), placeholder: t('integrations:catalog.homeassistant.tokenPlaceholder'), type: 'password' },
-                { key: 'ha_entity_id', label: t('integrations:catalog.homeassistant.entityLabel'), placeholder: t('integrations:catalog.homeassistant.entityPlaceholder'), type: 'text', optional: true },
+                { key: 'apiKey', label: t('integrations:catalog.homeassistant.keyLabel'), placeholder: t('integrations:catalog.homeassistant.keyPlaceholder'), type: 'password' },
             ],
         },
         {
@@ -131,40 +136,17 @@ const Integrations: React.FC = () => {
             name: 'Grocy',
             tagline: t('integrations:catalog.grocy.tagline'),
             description: t('integrations:catalog.grocy.description'),
-            syncs: [t('integrations:syncs.shopping'), t('integrations:syncs.stock')],
+            syncs: [t('integrations:syncs.pantry'), t('integrations:syncs.chores')],
             fields: [
                 { key: 'base_url', label: t('integrations:catalog.grocy.urlLabel'), placeholder: t('integrations:catalog.grocy.urlPlaceholder'), type: 'url' },
                 { key: 'apiKey', label: t('integrations:catalog.grocy.keyLabel'), placeholder: t('integrations:catalog.grocy.keyPlaceholder'), type: 'password' },
             ],
         },
         {
-            id: 'nextcloud',
-            name: 'Nextcloud',
-            tagline: t('integrations:catalog.nextcloud.tagline'),
-            description: t('integrations:catalog.nextcloud.description'),
-            syncs: [t('integrations:syncs.calendar'), t('integrations:syncs.appointments')],
-            fields: [
-                { key: 'base_url', label: t('integrations:catalog.nextcloud.urlLabel'), placeholder: t('integrations:catalog.nextcloud.urlPlaceholder'), type: 'url' },
-                { key: 'username', label: t('integrations:catalog.nextcloud.userLabel'), placeholder: t('integrations:catalog.nextcloud.userPlaceholder'), type: 'text' },
-                { key: 'password', label: t('integrations:catalog.nextcloud.passwordLabel'), placeholder: t('integrations:catalog.nextcloud.passwordPlaceholder'), type: 'password' },
-            ],
-        },
-        {
-            id: 'immich',
-            name: 'Immich',
-            tagline: t('integrations:catalog.immich.tagline'),
-            description: t('integrations:catalog.immich.description'),
-            syncs: [t('integrations:syncs.photos')],
-            fields: [
-                { key: 'base_url', label: t('integrations:catalog.immich.urlLabel'), placeholder: t('integrations:catalog.immich.urlPlaceholder'), type: 'url' },
-                { key: 'apiKey', label: t('integrations:catalog.immich.keyLabel'), placeholder: t('integrations:catalog.immich.keyPlaceholder'), type: 'password' },
-            ],
-        },
-        {
             id: 'google_calendar',
             name: 'Google Calendar',
-            tagline: t('integrations:catalog.google_calendar.tagline', 'Sincronização bidirecional de compromissos da família'),
-            description: t('integrations:catalog.google_calendar.description', 'Conecte sua conta do Google para sincronizar os eventos do calendário com o OpenFamily.'),
+            tagline: t('integrations:catalog.google_calendar.tagline', 'Espelhamento de compromissos da família'),
+            description: t('integrations:catalog.google_calendar.description', 'Conecte sua conta do Google para visualizar seus eventos no OpenFamily.'),
             syncs: [t('integrations:syncs.calendar', 'Calendrier'), t('integrations:syncs.appointments', 'Rendez-vous')],
             fields: [
                 { key: 'client_id', label: 'Client ID', placeholder: 'xxxxxx.apps.googleusercontent.com', type: 'text' },
@@ -181,9 +163,11 @@ const Integrations: React.FC = () => {
     const [testing, setTesting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [syncingId, setSyncingId] = useState<string | null>(null);
-    const [userCalendars, setUserCalendars] = useState<Array<{ id: string; summary: string; primary?: boolean }>>([]);
+    const [userCalendars, setUserCalendars] = useState<Array<{ id: string; summary: string; primary?: boolean; backgroundColor?: string }>>([]);
     const [loadingCalendars, setLoadingCalendars] = useState(false);
     const [showCalendarSelector, setShowCalendarSelector] = useState(false);
+    const [selectedCalIds, setSelectedCalIds] = useState<string[]>([]);
+    const [calColors] = useState<Record<string, string>>({});
 
     useEffect(() => { void load(); }, []);
 
@@ -191,72 +175,54 @@ const Integrations: React.FC = () => {
         try {
             const res = await api.get<{ success: boolean; data: Integration[] }>('/api/integrations');
             if (res.success) setIntegrations(res.data);
-        } finally {
-            setLoadingCalendars(false);
-            setLoading(false);
-        }
+        } finally { setLoading(false); }
     };
 
     const loadCalendars = async () => {
         setLoadingCalendars(true);
         try {
-            const res = await api.get<{ success: boolean; calendars: Array<{ id: string; summary: string; primary?: boolean }> }>('/api/integrations/google/calendars');
+            const res = await api.get<{ success: boolean; calendars: any[] }>('/api/integrations/google/calendars');
             if (res.success && res.calendars) {
                 setUserCalendars(res.calendars);
+                const primaryCal = res.calendars.find((c: any) => c.primary) || res.calendars[0];
+                setSelectedCalIds(primaryCal ? [primaryCal.id] : []);
                 setShowCalendarSelector(true);
             }
-        } catch {
-            alert('Não foi possível carregar a lista de agendas do Google.');
-        } finally {
-            setLoadingCalendars(false);
-        }
+        } catch { alert('Erro ao carregar agendas.'); } finally { setLoadingCalendars(false); }
     };
 
-    const selectCalendar = async (calId: string, calSummary: string) => {
+    const toggleCalSelection = (id: string) => setSelectedCalIds((prev: string[]) => prev.includes(id) ? prev.filter((i: string) => i !== id) : [...prev, id]);
+
+    const saveSelectedCalendars = async () => {
+        const payload = selectedCalIds.map((id: string) => {
+            const cal = userCalendars.find((c) => c.id === id);
+            return { id, summary: cal?.summary || id, color: calColors[id] || cal?.backgroundColor || '#4285F4' };
+        });
         try {
-            await api.post('/api/integrations/google/select-calendar', {
-                calendar_id: calId,
-                calendar_title: calSummary,
-            });
-            alert(`Agenda "${calSummary}" vinculada com sucesso!`);
+            await api.post('/api/integrations/google/select-calendars', { selected_calendars: payload });
             setShowCalendarSelector(false);
             void load();
-        } catch {
-            alert('Erro ao vincular a agenda selecionada.');
-        }
+        } catch { alert('Erro ao salvar.'); }
     };
 
-    const openModal = (type: string) => {
-        setActiveModal(type);
-        setFormValues({});
-        setTestStatus(null);
+    const disconnectAndCleanGoogle = async () => {
+        if (!confirm('Desconectar o Google Calendar e limpar todos os dados locais do OpenFamily?')) return;
+        await api.post('/api/integrations/google/disconnect-and-clean', {});
+        void load();
     };
 
-    const closeModal = () => {
-        setActiveModal(null);
-        setFormValues({});
-        setTestStatus(null);
-    };
+    const openModal = (type: string) => { setActiveModal(type); setFormValues({}); setTestStatus(null); };
+    const closeModal = () => setActiveModal(null);
 
     const handleTest = async () => {
-        if (!activeModal) return;
         setTesting(true);
-        setTestStatus(null);
         try {
-            const res = await api.post<{ success: boolean; message: string }>('/api/integrations/test', {
-                type: activeModal,
-                ...formValues,
-            });
+            const res = await api.post<{ success: boolean; message: string }>('/api/integrations/test', { type: activeModal, ...formValues });
             setTestStatus({ ok: res.success, message: res.message });
-        } catch (e) {
-            setTestStatus({ ok: false, message: e instanceof Error ? e.message : t('integrations:modal.error') });
-        } finally {
-            setTesting(false);
-        }
+        } catch (err: any) { setTestStatus({ ok: false, message: err.message }); } finally { setTesting(false); }
     };
 
     const handleConnect = async () => {
-        if (!activeModal) return;
         setSaving(true);
         try {
             if (activeModal === 'google_calendar') {
@@ -271,147 +237,54 @@ const Integrations: React.FC = () => {
                     return;
                 }
             }
-
-            const res = await api.post<{ success: boolean; data: Integration }>('/api/integrations', {
-                type: activeModal,
-                ...formValues,
-            });
-            if (res.success) {
-                setIntegrations((prev) => [...prev.filter((i) => i.type !== res.data.type), res.data]);
-                closeModal();
-            }
-        } finally {
-            setSaving(false);
-        }
+            await api.post('/api/integrations', { type: activeModal, display_name: CATALOG.find((c) => c.id === activeModal)?.name, ...formValues });
+            closeModal();
+            void load();
+        } finally { setSaving(false); }
     };
 
-    const handleDisconnect = async (id: string) => {
-        if (!confirm(t('integrations:confirmDisconnect'))) return;
-        await api.delete(`/api/integrations/${id}`);
-        setIntegrations((prev) => prev.filter((i) => i.id !== id));
-    };
+    const handleSync = async (id: string) => { setSyncingId(id); await api.post(`/api/integrations/${id}/sync`, {}); setSyncingId(null); void load(); };
 
-    const handleSync = async (id: string) => {
-        setSyncingId(id);
-        try {
-            await api.post(`/api/integrations/${id}/sync`, {});
-            await load();
-        } finally {
-            setSyncingId(null);
-        }
-    };
-
-    const fmtDate = (iso: string | null) => {
-        if (!iso) return null;
-        return new Intl.DateTimeFormat(intlLocale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
-    };
-
-    const connectedMap = new Map(integrations.map((i) => [i.type, i]));
-    const activeCatalog = CATALOG.filter((c) => connectedMap.has(c.id));
-    const availableCatalog = CATALOG.filter((c) => !connectedMap.has(c.id));
-
-    if (loading) {
-        return (
-            <div className="flex h-full items-center justify-center min-h-[50vh]">
-                <div className="spinner-brand" />
-            </div>
-        );
-    }
+    const availableCatalog = CATALOG.filter((c) => !integrations.find((i) => i.type === c.id));
 
     return (
-        <div className="space-y-8 max-w-2xl">
+        <div className="space-y-6 max-w-4xl mx-auto pb-12">
             <div>
-                <h1 className="font-serif text-display text-foreground">{t('integrations:title')}</h1>
-                <p className="text-caption text-muted-foreground mt-1">
-                    {t('integrations:subtitle')}
-                </p>
+                <h1 className="font-serif text-h1 text-foreground">{t('integrations:title')}</h1>
+                <p className="text-body-sm text-muted-foreground mt-1">{t('integrations:subtitle')}</p>
             </div>
 
-            {activeCatalog.length > 0 && (
+            {loading && <div className="flex justify-center py-12"><span className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
+
+            {!loading && integrations.length > 0 && (
                 <section>
-                    <h2 className="font-serif text-h2 mb-4">{t('integrations:connected')}</h2>
-                    <div className="rounded-card border border-border bg-card divide-y divide-border overflow-hidden">
-                        {activeCatalog.map((item) => {
-                            const integ = connectedMap.get(item.id)!;
-                            const syncing = syncingId === integ.id || integ.status === 'syncing';
+                    <h2 className="font-serif text-h2 mb-4">{t('integrations:active')}</h2>
+                    <div className="grid gap-3">
+                        {integrations.map((integ) => {
+                            const item = CATALOG.find((c) => c.id === integ.type);
+                            if (!item) return null;
+                            const isGoogle = integ.type === 'google_calendar';
                             return (
-                                <div key={item.id} className="flex items-center gap-4 px-5 py-4">
-                                    <div className="h-9 w-9 shrink-0 rounded-input flex items-center justify-center bg-surface-2 border border-border">
-                                        <BrandIcon id={item.id} size={20} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <p className="text-body font-semibold text-foreground">{item.name}</p>
-                                            {integ.status === 'error' ? (
-                                                <span className="inline-flex items-center gap-1 text-micro text-danger">
-                                                    <AlertCircle className="h-3 w-3" /> {t('integrations:status.error')}
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1 text-micro text-success">
-                                                    <CheckCircle2 className="h-3 w-3" /> {t('integrations:status.connected')}
-                                                </span>
+                                <div key={integ.id} className="flex items-center justify-between gap-4 rounded-card border border-border bg-card p-5 shadow-sm">
+                                    <div className="flex items-center gap-4">
+                                        <div className="h-11 w-11 rounded-input flex items-center justify-center bg-surface-2 border"><BrandIcon id={item.id} size={22} /></div>
+                                        <div>
+                                            <div className="flex items-center gap-2"><p className="text-body font-semibold">{item.name}</p>{statusBadge(integ.status)}</div>
+                                            {isGoogle && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <button onClick={loadCalendars} disabled={loadingCalendars} className="text-micro px-2.5 py-1 rounded border border-primary/40 bg-primary/10 text-primary font-medium hover:bg-primary/20 transition-colors flex items-center gap-1.5">
+                                                        <Calendar className="h-3.5 w-3.5" /> Vincular Agendas
+                                                    </button>
+                                                    <button onClick={disconnectAndCleanGoogle} className="text-micro px-2.5 py-1 rounded border border-danger/30 bg-danger/10 text-danger font-medium hover:bg-danger/20 transition-colors flex items-center gap-1.5">
+                                                        <Trash2 className="h-3.5 w-3.5" /> Desconectar e Limpar
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
-                                        <p className="text-micro text-muted-foreground truncate">{integ.base_url}</p>
-                                        {integ.last_error && (
-                                            <p className="text-micro text-danger mt-0.5 line-clamp-1">{integ.last_error}</p>
-                                        )}
-                                        {integ.last_synced_at && (
-                                            <p className="text-micro text-muted-foreground mt-0.5 flex items-center gap-1">
-                                                <Clock className="h-3 w-3" />
-                                                {t('integrations:lastSync', { date: fmtDate(integ.last_synced_at) })}
-                                            </p>
-                                        )}
-                                        {item.id === 'google_calendar' && (
-                                            <div className="mt-2 flex items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={loadCalendars}
-                                                    disabled={loadingCalendars}
-                                                    className="text-micro px-2 py-1 rounded border border-primary/40 bg-primary/10 text-primary font-medium hover:bg-primary/20 transition-colors flex items-center gap-1"
-                                                >
-                                                    <Calendar className="h-3 w-3" />
-                                                    {(integ.config as any)?.calendar_title ? `Agenda: ${(integ.config as any).calendar_title}` : 'Selecionar Agenda do Google'}
-                                                </button>
-                                            </div>
-                                        )}
                                     </div>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                        {item.id === 'google_calendar' && (
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    if (!confirm('Deseja limpar todos os eventos locais antigos do OpenFamily para iniciar do zero com o Google Calendar? (Seu Google não será afetado)')) return;
-                                                    try {
-                                                        await api.post('/api/integrations/google/clean', {});
-                                                        alert('Eventos locais limpos com sucesso!');
-                                                    } catch {
-                                                        alert('Erro ao limpar eventos locais.');
-                                                    }
-                                                }}
-                                                title="Limpar compromissos locais antigos (Iniciar do zero)"
-                                                className="p-2 rounded-input text-muted-foreground hover:bg-danger/10 hover:text-danger transition-colors flex items-center gap-1 text-micro font-medium"
-                                            >
-                                                <Trash2 className="h-4 w-4 text-danger" />
-                                            </button>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSync(integ.id)}
-                                            disabled={syncing}
-                                            title={t('integrations:syncTitle')}
-                                            className="p-2 rounded-input text-muted-foreground hover:bg-surface-2 hover:text-foreground disabled:opacity-50 transition-colors"
-                                        >
-                                            <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleDisconnect(integ.id)}
-                                            title={t('integrations:disconnectTitle')}
-                                            className="p-2 rounded-input text-muted-foreground hover:bg-danger/10 hover:text-danger transition-colors"
-                                        >
-                                            <Unplug className="h-4 w-4" />
-                                        </button>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => handleSync(integ.id)} className="p-2 text-muted-foreground hover:text-foreground"><RefreshCw className={cn('h-4 w-4', syncingId === integ.id && 'animate-spin')} /></button>
+                                        <button onClick={() => api.delete(`/api/integrations/${integ.id}`).then(load)} className="p-2 text-danger"><Unplug className="h-4 w-4" /></button>
                                     </div>
                                 </div>
                             );
@@ -420,170 +293,84 @@ const Integrations: React.FC = () => {
                 </section>
             )}
 
-            {availableCatalog.length > 0 && (
-                <section>
-                    <h2 className="font-serif text-h2 mb-4">{t('integrations:available')}</h2>
-                    <div className="grid gap-3">
-                        {availableCatalog.map((item) => (
-                            <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => openModal(item.id)}
-                                className="group flex items-center gap-4 rounded-card border border-border bg-card p-5 text-left hover:bg-surface-2 transition-colors"
-                            >
-                                <div className="h-11 w-11 shrink-0 rounded-input flex items-center justify-center bg-surface-2 border border-border group-hover:border-border-strong transition-colors">
-                                    <BrandIcon id={item.id} size={22} />
+            <section>
+                <h2 className="font-serif text-h2 mb-4">{t('integrations:available')}</h2>
+                <div className="grid gap-3">
+                    {availableCatalog.map((item) => (
+                        <button key={item.id} onClick={() => openModal(item.id)} className="flex items-center gap-4 rounded-card border border-border bg-card p-5 text-left hover:bg-surface-2">
+                            <div className="h-11 w-11 rounded-input flex items-center justify-center bg-surface-2 border"><BrandIcon id={item.id} size={22} /></div>
+                            <div><p className="font-semibold">{item.name}</p><p className="text-caption text-muted-foreground">{item.tagline}</p></div>
+                        </button>
+                    ))}
+                </div>
+            </section>
+
+            {activeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeModal} />
+                    <Card className="relative w-full max-w-md">
+                        <CardHeader className="flex justify-between flex-row items-center">
+                            <CardTitle className="font-serif text-h2">Conectar {CATALOG.find((c) => c.id === activeModal)?.name}</CardTitle>
+                            <X className="h-4 w-4 cursor-pointer" onClick={closeModal} />
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {CATALOG.find((c) => c.id === activeModal)?.fields.map((f) => (
+                                <Input key={f.key} label={f.label} type={f.type} value={formValues[f.key] || ''} onChange={(e) => setFormValues((v) => ({ ...v, [f.key]: e.target.value }))} />
+                            ))}
+                            {testStatus && (
+                                <div className={cn('p-3 rounded-card text-caption flex items-center gap-2 border', testStatus.ok ? 'border-success/30 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger')}>
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span>{testStatus.message}</span>
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-body font-semibold text-foreground">{item.name}</p>
-                                    <p className="text-caption text-muted-foreground">{item.tagline}</p>
-                                    <div className="flex flex-wrap gap-1.5 mt-2">
-                                        {item.syncs.map((s) => (
-                                            <span key={s} className="text-micro px-2 py-0.5 rounded-full border border-border bg-surface-2 text-muted-foreground">
-                                                {s}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                                <Plug className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                            </button>
-                        ))}
-                    </div>
-                </section>
+                            )}
+                            <div className="flex gap-2">
+                                <Button variant="secondary" onClick={handleTest} disabled={testing}>{testing ? 'Testando...' : 'Testar'}</Button>
+                                <Button onClick={handleConnect} disabled={saving}>{saving ? 'Conectando...' : 'Conectar'}</Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
             )}
-
-            {/* Connect modal */}
-            {activeModal && (() => {
-                const item = CATALOG.find((c) => c.id === activeModal)!;
-                const canSubmit = item.fields.filter((f) => !f.optional).every((f) => formValues[f.key]);
-                return (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeModal} />
-                        <Card className="relative w-full max-w-md shadow-lg" hover={false}>
-                            <CardHeader className="pb-4">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="flex items-center gap-3">
-                                        <div className="h-10 w-10 shrink-0 rounded-input flex items-center justify-center bg-surface-2 border border-border">
-                                            <BrandIcon id={item.id} size={22} />
-                                        </div>
-                                        <div>
-                                            <CardTitle className="font-serif text-h2">
-                                                {t('integrations:modal.connect', { name: item.name })}
-                                            </CardTitle>
-                                            <p className="text-caption text-muted-foreground mt-0.5">{item.description}</p>
-                                        </div>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={closeModal}
-                                        className="p-1.5 rounded-input text-muted-foreground hover:bg-surface-2 shrink-0"
-                                    >
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                {item.fields.map((field) => (
-                                    <Input
-                                        key={field.key}
-                                        label={field.label}
-                                        type={field.type}
-                                        placeholder={field.placeholder}
-                                        value={formValues[field.key] || ''}
-                                        onChange={(e) => setFormValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                                    />
-                                ))}
-
-                                {testStatus && (
-                                    <div className={cn(
-                                        'flex items-start gap-2 rounded-input border p-3 text-caption',
-                                        testStatus.ok
-                                            ? 'border-success/30 bg-success/10 text-success'
-                                            : 'border-danger/30 bg-danger/10 text-danger'
-                                    )}>
-                                        {testStatus.ok
-                                            ? <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-                                            : <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />}
-                                        <span>{testStatus.message}</span>
-                                    </div>
-                                )}
-
-                                <div className="flex gap-2 pt-2">
-                                    <Button
-                                        variant="secondary"
-                                        onClick={handleTest}
-                                        disabled={!canSubmit || testing}
-                                        className="flex-1"
-                                    >
-                                        {testing ? (
-                                            <span className="flex items-center gap-2">
-                                                <span className="h-3.5 w-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-                                                {t('integrations:modal.testing')}
-                                            </span>
-                                        ) : t('integrations:modal.test')}
-                                    </Button>
-                                    <Button
-                                        onClick={handleConnect}
-                                        disabled={!canSubmit || saving}
-                                        className="flex-1"
-                                    >
-                                        {saving ? (
-                                            <span className="flex items-center gap-2">
-                                                <span className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                                {t('integrations:modal.connecting')}
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center gap-2">
-                                                <Plug className="h-3.5 w-3.5" />
-                                                {t('integrations:modal.connectBtn')}
-                                            </span>
-                                        )}
-                                    </Button>
-                                </div>
-
-                                <p className="text-micro text-muted-foreground text-center">
-                                    {t('integrations:modal.encrypted')}
-                                </p>
-                            </CardContent>
-                        </Card>
-                    </div>
-                );
-            })()}
 
             {showCalendarSelector && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCalendarSelector(false)} />
-                    <Card className="relative w-full max-w-md shadow-lg" hover={false}>
-                        <CardHeader className="pb-4">
-                            <div className="flex items-center justify-between">
-                                <CardTitle className="font-serif text-h2 flex items-center gap-2">
-                                    <Calendar className="h-5 w-5 text-primary" />
-                                    Selecionar Agenda do Google
-                                </CardTitle>
-                                <button type="button" onClick={() => setShowCalendarSelector(false)} className="p-1.5 rounded-input text-muted-foreground hover:bg-surface-2">
-                                    <X className="h-4 w-4" />
-                                </button>
-                            </div>
-                            <p className="text-caption text-muted-foreground mt-1">
-                                Escolha a agenda da sua conta Google para sincronizar com o OpenFamily (ex: "Calendário da Família"):
-                            </p>
+                    <Card className="relative w-full max-w-lg">
+                        <CardHeader className="flex justify-between flex-row items-center">
+                            <CardTitle className="font-serif text-h2">Vincular Agendas do Google</CardTitle>
+                            <X className="h-4 w-4 cursor-pointer" onClick={() => setShowCalendarSelector(false)} />
                         </CardHeader>
                         <CardContent className="space-y-2 max-h-80 overflow-y-auto">
-                            {userCalendars.map((cal) => (
-                                <button
-                                    key={cal.id}
-                                    type="button"
-                                    onClick={() => selectCalendar(cal.id, cal.summary)}
-                                    className="w-full p-3 rounded-card border border-border bg-surface-1 hover:bg-surface-2 hover:border-primary/40 text-left flex items-center justify-between transition-colors font-medium text-foreground"
-                                >
-                                    <div>
-                                        <p className="text-body font-semibold text-foreground">{cal.summary}</p>
-                                        {cal.primary && <span className="text-micro text-primary font-medium">Agenda Principal</span>}
+                            {userCalendars.map((cal, idx) => {
+                                const isChecked = selectedCalIds.includes(cal.id);
+                                const defaultColors = ['#4285F4', '#0F9D58', '#F4B400', '#DB4437', '#AB47BC', '#00ACC1'];
+                                const currentColor = calColors[cal.id] || cal.backgroundColor || defaultColors[idx % defaultColors.length];
+
+                                return (
+                                    <div
+                                        key={cal.id}
+                                        onClick={() => toggleCalSelection(cal.id)}
+                                        className={cn('p-3 rounded-card border cursor-pointer flex justify-between items-center', isChecked ? 'border-primary bg-primary/5' : 'border-border')}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <input type="checkbox" checked={isChecked} onChange={() => toggleCalSelection(cal.id)} className="h-4 w-4 text-primary" />
+                                            <div>
+                                                <p className="font-medium flex items-center gap-2">
+                                                    <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: currentColor }} />
+                                                    {cal.summary}
+                                                </p>
+                                                {cal.primary && <span className="text-micro text-primary font-medium">Principal</span>}
+                                            </div>
+                                        </div>
+                                        {isChecked && <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />}
                                     </div>
-                                    <Plug className="h-4 w-4 text-muted-foreground" />
-                                </button>
-                            ))}
+                                );
+                            })}
                         </CardContent>
+                        <div className="p-4 border-t flex justify-end gap-2">
+                            <Button variant="secondary" onClick={() => setShowCalendarSelector(false)}>Cancelar</Button>
+                            <Button onClick={saveSelectedCalendars}>Salvar Agendas Selecionadas</Button>
+                        </div>
                     </Card>
                 </div>
             )}

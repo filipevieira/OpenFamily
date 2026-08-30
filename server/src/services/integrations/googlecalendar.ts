@@ -25,11 +25,18 @@ export interface GoogleOAuthTokens {
     expiry_date?: number;
 }
 
+export interface SelectedCalendarConfig {
+    id: string;
+    summary: string;
+    color?: string;
+}
+
 export interface GoogleCalendarConfig {
     client_id: string;
     client_secret: string;
     calendar_id?: string;
     calendar_title?: string;
+    selected_calendars?: SelectedCalendarConfig[];
     sync_direction?: 'bidirectional' | 'import_only' | 'export_only';
     auto_sync?: boolean;
 }
@@ -163,40 +170,35 @@ export async function testGoogleCalendarConnection(
     }
 }
 
-/** Get valid access token for integration, refreshing if expired. */
-export async function getValidAccessToken(integrationId: string, familyId: string): Promise<{ accessToken: string; calendarId: string }> {
+/** Helper to get a valid access token for API calls. */
+export async function getValidAccessToken(integrationId: string, familyId: string): Promise<{ accessToken: string; calendarId: string; config: GoogleCalendarConfig }> {
     const result = await query(
-        `SELECT id, config, encrypted_credentials FROM integrations WHERE family_id = $1 AND type = 'google_calendar'`,
+        `SELECT id, encrypted_credentials, config FROM integrations WHERE family_id = $1 AND type = 'google_calendar'`,
         [familyId]
     );
 
     if (result.rows.length === 0 || !result.rows[0].encrypted_credentials) {
-        throw new Error('Google Calendar integration not connected');
+        throw new Error('Google Calendar integration missing or not connected');
     }
 
-    const integ = result.rows[0];
-    const config = (integ.config || {}) as GoogleCalendarConfig;
-    const calendarId = config.calendar_id || 'primary';
-    const tokens = decryptCredentials(integ.encrypted_credentials) as unknown as GoogleOAuthTokens;
+    const row = result.rows[0];
+    const config = (row.config || {}) as GoogleCalendarConfig;
+    const tokens = decryptCredentials(row.encrypted_credentials) as unknown as GoogleOAuthTokens;
 
     let accessToken = tokens.access_token;
     if (tokens.expiry_date && Date.now() >= tokens.expiry_date - 60_000 && tokens.refresh_token) {
         if (config.client_id && config.client_secret) {
-            const newTokens = await refreshGoogleAccessToken(
-                tokens.refresh_token,
-                config.client_id,
-                config.client_secret
-            );
+            const newTokens = await refreshGoogleAccessToken(tokens.refresh_token, config.client_id, config.client_secret);
             accessToken = newTokens.access_token;
             const updatedEncrypted = encryptCredentials(newTokens as unknown as Record<string, string>);
-            await query('UPDATE integrations SET encrypted_credentials = $1 WHERE id = $2', [updatedEncrypted, integ.id]);
+            await query('UPDATE integrations SET encrypted_credentials = $1 WHERE id = $2', [updatedEncrypted, row.id]);
         }
     }
 
-    return { accessToken, calendarId };
+    return { accessToken, calendarId: config.calendar_id || 'primary', config };
 }
 
-/** Fetch list of all calendars accessible by the user. */
+/** Fetch user's Google Calendars. */
 export async function fetchUserCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
     await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
 
@@ -282,20 +284,18 @@ export async function createGoogleCalendarEvent(
     });
 
     if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        logger.error('google_calendar.create_event_failed', { status: response.status, errText });
-        throw new Error(`Failed to create Google Calendar event: HTTP ${response.status}`);
+        throw new Error(`Google Calendar create event failed: HTTP ${response.status}`);
     }
 
-    const data = (await response.json()) as { id: string };
-    return { googleEventId: data.id };
+    const resData = (await response.json()) as { id: string };
+    return { googleEventId: resData.id };
 }
 
 /** Update event on Google Calendar. */
 export async function updateGoogleCalendarEvent(
     accessToken: string,
     calendarId: string,
-    googleEventId: string,
+    eventId: string,
     event: { title: string; location?: string; notes?: string; specificDate?: string; startTime?: string; endTime?: string }
 ): Promise<void> {
     await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
@@ -312,9 +312,9 @@ export async function updateGoogleCalendarEvent(
         end: { dateTime: new Date(endIso).toISOString() },
     };
 
-    const url = `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`;
+    const url = `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
     const response = await safeFetch(url, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
@@ -324,19 +324,19 @@ export async function updateGoogleCalendarEvent(
     });
 
     if (!response.ok) {
-        logger.error('google_calendar.update_event_failed', { status: response.status });
+        throw new Error(`Google Calendar update event failed: HTTP ${response.status}`);
     }
 }
 
-/** Delete event from Google Calendar. */
+/** Delete event on Google Calendar. */
 export async function deleteGoogleCalendarEvent(
     accessToken: string,
     calendarId: string,
-    googleEventId: string
+    eventId: string
 ): Promise<void> {
     await assertSafeIntegrationUrl(GOOGLE_CALENDAR_API_BASE);
 
-    const url = `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`;
+    const url = `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
     const response = await safeFetch(url, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -347,6 +347,8 @@ export async function deleteGoogleCalendarEvent(
         logger.error('google_calendar.delete_event_failed', { status: response.status });
     }
 }
+
+
 
 /** Sync Google Calendar events to OpenFamily schedule entries / appointments. */
 export async function syncGoogleCalendar(
@@ -379,102 +381,115 @@ export async function syncGoogleCalendar(
         }
     }
 
-    const targetCalendarId = (config.calendar_id as string) || 'primary';
-    const events = await fetchGoogleCalendarEvents(accessToken, targetCalendarId);
+    const clientConfig = config as unknown as GoogleCalendarConfig;
+    const calendarListToSync: SelectedCalendarConfig[] =
+        clientConfig.selected_calendars && clientConfig.selected_calendars.length > 0
+            ? clientConfig.selected_calendars
+            : [{ id: clientConfig.calendar_id || 'primary', summary: clientConfig.calendar_title || 'Agenda Principal' }];
+
     let imported = 0;
     let errors = 0;
 
-    for (const event of events) {
+    for (const calConfig of calendarListToSync) {
         try {
-            if (!event.summary || !event.start) continue;
+            const events = await fetchGoogleCalendarEvents(accessToken, calConfig.id);
 
-            // Ignore cancelled events
-            if (event.status === 'cancelled') {
-                await query('DELETE FROM schedule_entries WHERE user_id = $1 AND google_event_id = $2', [familyId, event.id]);
-                continue;
-            }
+            for (const event of events) {
+                try {
+                    if (!event.summary || !event.start) continue;
 
-            const title = event.summary.slice(0, 255);
-            const location = event.location ? event.location.slice(0, 255) : null;
-            const notes = event.description ? event.description.slice(0, 500) : null;
+                    // Ignore cancelled events
+                    if (event.status === 'cancelled') {
+                        await query('DELETE FROM schedule_entries WHERE user_id = $1 AND google_event_id = $2', [familyId, event.id]);
+                        await query('DELETE FROM appointments WHERE user_id = $1 AND google_event_id = $2', [familyId, event.id]);
+                        continue;
+                    }
 
-            // Handle date vs dateTime
-            let specificDate: string | null = null;
-            let startTime = '09:00:00';
-            let endTime = '10:00:00';
-            let dayOfWeek = 1;
+                    const title = event.summary.slice(0, 255);
+                    const location = event.location ? event.location.slice(0, 255) : null;
+                    const notes = event.description ? event.description.slice(0, 500) : null;
 
-            if (event.start.date) {
-                specificDate = event.start.date;
-                const d = new Date(event.start.date);
-                dayOfWeek = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
-            } else if (event.start.dateTime) {
-                const startDate = new Date(event.start.dateTime);
-                specificDate = startDate.toISOString().split('T')[0];
-                const pad = (n: number) => String(n).padStart(2, '0');
-                startTime = `${pad(startDate.getHours())}:${pad(startDate.getMinutes())}:00`;
-                dayOfWeek = startDate.getDay() === 0 ? 7 : startDate.getDay();
+                    // Handle date vs dateTime
+                    let specificDate: string | null = null;
+                    let startTime = '09:00:00';
+                    let endTime = '10:00:00';
+                    let dayOfWeek = 1;
 
-                if (event.end?.dateTime) {
-                    const endDate = new Date(event.end.dateTime);
-                    endTime = `${pad(endDate.getHours())}:${pad(endDate.getMinutes())}:00`;
-                }
-            }
+                    if (event.start.date) {
+                        specificDate = event.start.date;
+                        const d = new Date(event.start.date);
+                        dayOfWeek = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+                    } else if (event.start.dateTime) {
+                        const startDate = new Date(event.start.dateTime);
+                        specificDate = startDate.toISOString().split('T')[0];
+                        const pad = (n: number) => String(n).padStart(2, '0');
+                        startTime = `${pad(startDate.getHours())}:${pad(startDate.getMinutes())}:00`;
+                        dayOfWeek = startDate.getDay() === 0 ? 7 : startDate.getDay();
 
-            // Check if entry already exists by matching google_event_id OR title+date
-            const existing = await query(
-                `SELECT id FROM schedule_entries WHERE user_id = $1 AND (google_event_id = $2 OR (title = $3 AND specific_date = $4))`,
-                [familyId, event.id, title, specificDate]
-            );
+                        if (event.end?.dateTime) {
+                            const endDate = new Date(event.end.dateTime);
+                            endTime = `${pad(endDate.getHours())}:${pad(endDate.getMinutes())}:00`;
+                        }
+                    }
 
-            if (existing.rows.length > 0) {
-                // Update existing event details in OpenFamily
-                const existingId = existing.rows[0].id;
-                await query(
-                    `UPDATE schedule_entries
-                     SET title = $1, start_time = $2, end_time = $3, specific_date = $4, location = $5, notes = $6, google_event_id = $7, sync_source = 'google', updated_at = NOW()
-                     WHERE id = $8`,
-                    [title, startTime, endTime, specificDate, location, notes, event.id, existingId]
-                );
-            } else {
-                // Insert new event
-                const memberRes = await query('SELECT id FROM family_members WHERE user_id = $1 LIMIT 1', [familyId]);
-                const memberId = memberRes.rows[0]?.id;
-
-                if (memberId) {
-                    await query(
-                        `INSERT INTO schedule_entries
-                         (user_id, family_member_id, schedule_type, title, day_of_week, start_time, end_time, specific_date, location, notes, google_event_id, sync_source)
-                         VALUES ($1, $2, 'other', $3, $4, $5, $6, $7, $8, $9, $10, 'google')`,
-                        [familyId, memberId, title, dayOfWeek, startTime, endTime, specificDate, location, notes, event.id]
+                    // Check if entry already exists by matching google_event_id OR title+date
+                    const existing = await query(
+                        `SELECT id FROM schedule_entries WHERE user_id = $1 AND (google_event_id = $2 OR (title = $3 AND specific_date = $4))`,
+                        [familyId, event.id, title, specificDate]
                     );
-                    imported++;
+
+                    if (existing.rows.length > 0) {
+                        // Update existing event details in OpenFamily
+                        const existingId = existing.rows[0].id;
+                        await query(
+                            `UPDATE schedule_entries
+                             SET title = $1, start_time = $2, end_time = $3, specific_date = $4, location = $5, notes = $6, google_event_id = $7, sync_source = 'google', updated_at = NOW()
+                             WHERE id = $8`,
+                            [title, startTime, endTime, specificDate, location, notes, event.id, existingId]
+                        );
+                    } else {
+                        // Insert new event
+                        const memberRes = await query('SELECT id FROM family_members WHERE user_id = $1 LIMIT 1', [familyId]);
+                        const memberId = memberRes.rows[0]?.id;
+
+                        if (memberId) {
+                            await query(
+                                `INSERT INTO schedule_entries
+                                 (user_id, family_member_id, schedule_type, title, day_of_week, start_time, end_time, specific_date, location, notes, google_event_id, sync_source)
+                                 VALUES ($1, $2, 'other', $3, $4, $5, $6, $7, $8, $9, $10, 'google')`,
+                                [familyId, memberId, title, dayOfWeek, startTime, endTime, specificDate, location, notes, event.id]
+                            );
+                            imported++;
+                        }
+                    }
+
+                    // Also upsert into appointments table so Compromissos calendar stays 100% in sync
+                    const startIso = specificDate ? `${specificDate}T${startTime}` : new Date().toISOString();
+                    const endIso = specificDate ? `${specificDate}T${endTime}` : undefined;
+
+                    const existingApt = await query(
+                        `SELECT id FROM appointments WHERE user_id = $1 AND (google_event_id = $2 OR (title = $3 AND start_time = $4))`,
+                        [familyId, event.id, title, startIso]
+                    );
+
+                    if (existingApt.rows.length > 0) {
+                        await query(
+                            `UPDATE appointments
+                             SET title = $1, start_time = $2, end_time = $3, location = $4, notes = $5, google_event_id = $6, sync_source = 'google', updated_at = NOW()
+                             WHERE id = $7`,
+                            [title, startIso, endIso || null, location, notes, event.id, existingApt.rows[0].id]
+                        );
+                    } else {
+                        await query(
+                            `INSERT INTO appointments
+                             (user_id, title, start_time, end_time, location, notes, google_event_id, sync_source)
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, 'google')`,
+                            [familyId, title, startIso, endIso || null, location, notes, event.id]
+                        );
+                    }
+                } catch (e) {
+                    errors++;
                 }
-            }
-
-            // Also upsert into appointments table so Compromissos calendar stays 100% in sync
-            const startIso = specificDate ? `${specificDate}T${startTime}` : new Date().toISOString();
-            const endIso = specificDate ? `${specificDate}T${endTime}` : undefined;
-
-            const existingApt = await query(
-                `SELECT id FROM appointments WHERE user_id = $1 AND (google_event_id = $2 OR (title = $3 AND start_time = $4))`,
-                [familyId, event.id, title, startIso]
-            );
-
-            if (existingApt.rows.length > 0) {
-                await query(
-                    `UPDATE appointments
-                     SET title = $1, start_time = $2, end_time = $3, location = $4, notes = $5, google_event_id = $6, sync_source = 'google', updated_at = NOW()
-                     WHERE id = $7`,
-                    [title, startIso, endIso || null, location, notes, event.id, existingApt.rows[0].id]
-                );
-            } else {
-                await query(
-                    `INSERT INTO appointments
-                     (user_id, title, start_time, end_time, location, notes, google_event_id, sync_source)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, 'google')`,
-                    [familyId, title, startIso, endIso || null, location, notes, event.id]
-                );
             }
         } catch (e) {
             errors++;

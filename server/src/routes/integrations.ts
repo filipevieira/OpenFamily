@@ -318,6 +318,84 @@ router.post('/google/select-calendar', requireParent, async (req: AuthRequest, r
     }
 });
 
+// POST /api/integrations/google/select-calendars - Select multiple active Google Calendars with colors
+router.post('/google/select-calendars', requireParent, async (req: AuthRequest, res) => {
+    try {
+        const { selected_calendars } = req.body as { selected_calendars?: Array<{ id: string; summary: string; color?: string }> };
+        if (!selected_calendars || !Array.isArray(selected_calendars)) {
+            return res.status(400).json({ success: false, error: 'selected_calendars array is required' });
+        }
+
+        const existing = await query(
+            "SELECT id, config, encrypted_credentials, base_url FROM integrations WHERE family_id = $1 AND type = 'google_calendar'",
+            [req.userId]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Google Calendar integration not found' });
+        }
+
+        const currentConfig = (existing.rows[0].config || {}) as GoogleCalendarConfig;
+        const updatedConfig: GoogleCalendarConfig = {
+            ...currentConfig,
+            selected_calendars,
+            calendar_id: selected_calendars[0]?.id || 'primary',
+            calendar_title: selected_calendars[0]?.summary || 'Agenda Principal',
+        };
+
+        await query(
+            `UPDATE integrations
+             SET config = $1, updated_at = NOW()
+             WHERE family_id = $2 AND type = 'google_calendar'`,
+            [JSON.stringify(updatedConfig), req.userId]
+        );
+
+        // Wipe old Google entries before importing from newly selected calendars
+        await query("DELETE FROM schedule_entries WHERE user_id = $1 AND sync_source = 'google'", [req.userId]);
+        await query("DELETE FROM appointments WHERE user_id = $1 AND sync_source = 'google'", [req.userId]);
+
+        // Immediately trigger sync in background
+        if (existing.rows[0].encrypted_credentials) {
+            void syncGoogleCalendar(
+                existing.rows[0].id,
+                req.userId!,
+                existing.rows[0].base_url || 'https://calendar.google.com',
+                existing.rows[0].encrypted_credentials,
+                updatedConfig as unknown as Record<string, unknown>
+            ).then(() => {
+                broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'updated' });
+                broadcast(req.userId!, { type: 'update', entity: 'appointments', action: 'updated' });
+            }).catch(() => {});
+        }
+
+        broadcast(req.userId!, { type: 'update', entity: 'integrations', action: 'updated' });
+        res.json({ success: true, selected_calendars });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to select calendars';
+        res.status(500).json({ success: false, error: msg });
+    }
+});
+
+// POST /api/integrations/google/disconnect-and-clean - Disconnect Google and wipe local entries
+router.post('/google/disconnect-and-clean', requireParent, async (req: AuthRequest, res) => {
+    try {
+        await query("DELETE FROM integrations WHERE family_id = $1 AND type IN ('google_calendar', 'googlecalendar')", [req.userId]);
+        await query('DELETE FROM schedule_entry_members WHERE entry_id IN (SELECT id FROM schedule_entries WHERE user_id = $1)', [req.userId]);
+        await query('DELETE FROM schedule_entry_exceptions WHERE entry_id IN (SELECT id FROM schedule_entries WHERE user_id = $1)', [req.userId]);
+        await query('DELETE FROM schedule_entries WHERE user_id = $1', [req.userId]);
+        await query('DELETE FROM appointments WHERE user_id = $1', [req.userId]);
+
+        broadcast(req.userId!, { type: 'update', entity: 'integrations', action: 'updated' });
+        broadcast(req.userId!, { type: 'update', entity: 'planning', action: 'deleted' });
+        broadcast(req.userId!, { type: 'update', entity: 'appointments', action: 'deleted' });
+
+        res.json({ success: true, message: 'Google Calendar desconectado e todos os registros foram limpos.' });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to disconnect and clean';
+        res.status(500).json({ success: false, error: msg });
+    }
+});
+
 // GET /api/integrations/google/callback - Handle OAuth redirect code from Google
 router.get('/google/callback', async (req: AuthRequest, res) => {
     try {
