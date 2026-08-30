@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -176,8 +176,66 @@ const Kiosk: React.FC = () => {
     const [pairingCode, setPairingCode] = useState<string | null>(null);
     const [hasToken, setHasToken] = useState<boolean>(() => {
         const urlParams = new URLSearchParams(window.location.search);
-        return Boolean(urlParams.get('token') || api.getToken() || localStorage.getItem('openfamily.kioskToken'));
+        const queryToken = urlParams.get('token');
+        const storedToken = localStorage.getItem('openfamily.kioskToken');
+        const activeToken = queryToken || storedToken || api.getToken();
+        if (activeToken) {
+            api.setToken(activeToken);
+            localStorage.setItem('openfamily.kioskToken', activeToken);
+            return true;
+        }
+        return false;
     });
+
+    const handleInvalidateToken = useCallback(() => {
+        localStorage.removeItem('openfamily.kioskToken');
+        localStorage.removeItem('token');
+        api.setToken(null);
+        setHasToken(false);
+        setPairingCode(null);
+        if (typeof window !== 'undefined' && window.location.search.includes('token=')) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('token');
+            window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+        }
+    }, []);
+
+    // Remote revocation & token invalidation listener
+    useEffect(() => {
+        const onAuthExpired = () => {
+            handleInvalidateToken();
+        };
+        window.addEventListener('openfamily:auth-expired', onAuthExpired);
+        return () => {
+            window.removeEventListener('openfamily:auth-expired', onAuthExpired);
+        };
+    }, [handleInvalidateToken]);
+
+    // WebSocket instant revocation listener
+    useWebSocketUpdates('kiosk', (event: any) => {
+        if (event && (event.action === 'deleted' || event.data?.revoked)) {
+            handleInvalidateToken();
+        }
+    });
+
+    // 30s Periodic heartbeat
+    useEffect(() => {
+        if (!hasToken) return;
+
+        const sendHeartbeat = async () => {
+            try {
+                await api.post('/api/kiosk/heartbeat', {});
+            } catch (e: any) {
+                if (e?.message?.includes('401') || e?.status === 401) {
+                    handleInvalidateToken();
+                }
+            }
+        };
+
+        sendHeartbeat();
+        const id = setInterval(sendHeartbeat, 30_000);
+        return () => clearInterval(id);
+    }, [hasToken, handleInvalidateToken]);
 
     // TV Pairing (Netflix / HBO style) when no token is present
     useEffect(() => {
@@ -241,6 +299,7 @@ const Kiosk: React.FC = () => {
     }, []);
 
     const loadAll = async () => {
+        if (!hasToken) return;
         const today = new Date();
         // Naive local bounds — appointment times are stored as local
         // "YYYY-MM-DDTHH:mm:ss" strings, so the window must not be UTC.
@@ -263,16 +322,21 @@ const Kiosk: React.FC = () => {
             if (planRes.success) setPlanning(planRes.data);
             if (shopRes.success) setShopping(shopRes.data);
             if (notesRes.success) setNotes(notesRes.data);
-        } catch (e) {
+        } catch (e: any) {
             console.error('Kiosk load error:', e);
+            if (e?.message?.includes('401') || e?.status === 401) {
+                handleInvalidateToken();
+            }
         }
     };
 
     useEffect(() => {
-        void loadAll();
-        const id = setInterval(() => void loadAll(), 60_000); // refresh every minute
-        return () => clearInterval(id);
-    }, []);
+        if (hasToken) {
+            void loadAll();
+            const id = setInterval(() => void loadAll(), 60_000); // refresh every minute
+            return () => clearInterval(id);
+        }
+    }, [hasToken]);
     useWebSocketUpdates('appointments', () => void loadAll());
     useWebSocketUpdates('tasks', () => void loadAll());
     useWebSocketUpdates('meal-plans', () => void loadAll());
@@ -435,80 +499,98 @@ const Kiosk: React.FC = () => {
 
     if (!hasToken) {
         return (
-            <div className="min-h-screen bg-[#110a18] text-[#f2eaee] flex flex-col justify-between p-8 lg:p-14 select-none font-sans">
+            <div className="min-h-screen bg-[#110a18] text-[#f2eaee] flex flex-col justify-between p-3 sm:p-6 lg:p-10 select-none font-sans overflow-x-hidden">
                 {/* Top Header */}
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <img src={`${import.meta.env.BASE_URL}OpenFamily.png`} alt="OpenFamily" className="h-12 w-12 object-contain" />
-                        <span className="font-serif text-3xl font-bold tracking-tight text-white">OpenFamily TV</span>
+                <div className="flex items-center justify-between max-w-6xl mx-auto w-full">
+                    <div className="flex items-center gap-2.5 sm:gap-3">
+                        <img src={`${import.meta.env.BASE_URL}OpenFamily.png`} alt="OpenFamily" className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 object-contain" />
+                        <span className="font-serif text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-white">
+                            {t('kiosk:pairing.appTitle', 'OpenFamily TV')}
+                        </span>
                     </div>
-                    <div className="text-caption font-medium text-muted-foreground bg-surface/40 px-4 py-1.5 rounded-full border border-white/10">
-                        Modo Smart Display 42"
+                    <div className="text-micro sm:text-caption font-medium text-muted-foreground bg-surface/40 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-white/10">
+                        {t('kiosk:pairing.modeBadge', 'Smart Display')}
                     </div>
                 </div>
 
                 {/* Main Content (Netflix / HBO style 2 Columns) */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center max-w-6xl mx-auto w-full my-auto">
-                    <div className="space-y-8">
-                        <div className="space-y-3">
-                            <span className="text-primary font-bold uppercase tracking-widest text-caption">Autenticação Fácil de TV</span>
-                            <h1 className="text-4xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
-                                Conecte sua TV em segundos
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8 lg:gap-12 items-center max-w-6xl mx-auto w-full my-auto py-2 sm:py-4">
+                    <div className="space-y-4 sm:space-y-6 lg:space-y-8">
+                        <div className="space-y-1.5 sm:space-y-3">
+                            <span className="text-primary font-bold uppercase tracking-widest text-micro sm:text-caption">
+                                {t('kiosk:pairing.easyAuth', 'Autenticação Fácil de TV')}
+                            </span>
+                            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
+                                {t('kiosk:pairing.heading', 'Conecte sua TV em segundos')}
                             </h1>
-                            <p className="text-lg text-text-muted-base leading-relaxed">
-                                Não precisa usar o controle remoto para digitar sua senha. Use a câmera do seu celular!
+                            <p className="text-caption sm:text-base lg:text-lg text-text-muted-base leading-relaxed">
+                                {t('kiosk:pairing.subtitle', 'Não precisa usar o controle remoto para digitar sua senha. Use a câmera do seu celular!')}
                             </p>
                         </div>
 
-                        <div className="space-y-5 border-l-2 border-primary/40 pl-6">
-                            <div className="space-y-1">
-                                <span className="text-caption font-bold text-primary">PASSO 1</span>
-                                <p className="text-base text-white">Abra a câmera do seu celular</p>
+                        <div className="space-y-2.5 sm:space-y-4 lg:space-y-5 border-l-2 border-primary/40 pl-4 sm:pl-6">
+                            <div className="space-y-0.5 sm:space-y-1">
+                                <span className="text-micro sm:text-caption font-bold text-primary">
+                                    {t('kiosk:pairing.step1Title', 'PASSO 1')}
+                                </span>
+                                <p className="text-caption sm:text-base text-white">
+                                    {t('kiosk:pairing.step1Desc', 'Abra a câmera do seu celular')}
+                                </p>
                             </div>
-                            <div className="space-y-1">
-                                <span className="text-caption font-bold text-primary">PASSO 2</span>
-                                <p className="text-base text-white">Aponte para o QR Code ao lado</p>
+                            <div className="space-y-0.5 sm:space-y-1">
+                                <span className="text-micro sm:text-caption font-bold text-primary">
+                                    {t('kiosk:pairing.step2Title', 'PASSO 2')}
+                                </span>
+                                <p className="text-caption sm:text-base text-white">
+                                    {t('kiosk:pairing.step2Desc', 'Aponte para o QR Code ao lado')}
+                                </p>
                             </div>
-                            <div className="space-y-1">
-                                <span className="text-caption font-bold text-primary">PASSO 3</span>
-                                <p className="text-base text-white">Toque em <strong>"Autorizar esta TV"</strong> no celular</p>
+                            <div className="space-y-0.5 sm:space-y-1">
+                                <span className="text-micro sm:text-caption font-bold text-primary">
+                                    {t('kiosk:pairing.step3Title', 'PASSO 3')}
+                                </span>
+                                <p className="text-caption sm:text-base text-white">
+                                    {t('kiosk:pairing.step3Desc', 'Toque em "Autorizar esta TV" no celular')}
+                                </p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-[#1b1126] border border-[#2c1e38] rounded-3xl p-8 flex flex-col items-center text-center shadow-2xl space-y-6">
+                    <div className="bg-[#1b1126] border border-[#2c1e38] rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 flex flex-col items-center text-center shadow-2xl space-y-3 sm:space-y-5">
                         {pairingCode ? (
-                            <div className="bg-white p-4 rounded-2xl shadow-inner">
+                            <div className="bg-white p-2.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-inner w-[clamp(140px,20vw,260px)] h-[clamp(140px,20vw,260px)] max-h-[28vh] aspect-square flex items-center justify-center">
                                 <img
                                     src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(`${window.location.origin}/pair?code=${pairingCode}`)}`}
-                                    alt="QR Code de Pareamento"
-                                    className="w-60 h-60 object-contain"
+                                    alt={t('kiosk:pairing.qrAlt', 'QR Code de Pareamento')}
+                                    className="w-full h-full object-contain"
                                 />
                             </div>
                         ) : (
-                            <div className="w-60 h-60 bg-surface-2 animate-pulse rounded-2xl flex items-center justify-center text-caption text-muted-foreground">
-                                Gerando QR Code...
+                            <div className="w-[clamp(140px,20vw,260px)] h-[clamp(140px,20vw,260px)] max-h-[28vh] aspect-square bg-surface-2 animate-pulse rounded-xl sm:rounded-2xl flex items-center justify-center text-caption text-muted-foreground">
+                                {t('kiosk:pairing.generatingQr', 'Gerando QR Code...')}
                             </div>
                         )}
 
-                        <div className="space-y-2">
-                            <p className="text-caption text-text-muted-foreground uppercase tracking-wider font-medium">Ou acesse no celular:</p>
-                            <p className="text-caption text-primary font-mono">{window.location.origin}/pair</p>
-                            <div className="text-4xl lg:text-5xl font-mono font-bold tracking-widest text-white bg-[#110a18] py-3 px-6 rounded-2xl border border-primary/30 shadow-inner">
+                        <div className="space-y-1.5 sm:space-y-2">
+                            <p className="text-micro sm:text-caption text-text-muted-foreground uppercase tracking-wider font-medium">
+                                {t('kiosk:pairing.orAccess', 'Ou acesse no celular:')}
+                            </p>
+                            <p className="text-micro sm:text-caption text-primary font-mono">{window.location.origin}/pair</p>
+                            <div className="text-2xl sm:text-3xl lg:text-4xl font-mono font-bold tracking-widest text-white bg-[#110a18] py-2 sm:py-3 px-4 sm:px-6 rounded-xl sm:rounded-2xl border border-primary/30 shadow-inner">
                                 {pairingCode ? `${pairingCode.slice(0, 3)} - ${pairingCode.slice(3)}` : '...'}
                             </div>
                         </div>
 
                         <div className="flex items-center gap-2 text-micro text-text-muted-base animate-pulse">
-                            <div className="w-2.5 h-2.5 rounded-full bg-primary" />
-                            <span>Aguardando autorização pelo celular...</span>
+                            <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-primary" />
+                            <span>{t('kiosk:pairing.waitingAuth', 'Aguardando autorização pelo celular...')}</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Footer */}
-                <div className="text-center text-micro text-text-muted-base border-t border-white/5 pt-4">
-                    OpenFamily Smart Display • {window.location.hostname}
+                <div className="text-center text-micro text-text-muted-base border-t border-white/5 pt-2 sm:pt-4 max-w-6xl mx-auto w-full">
+                    {t('kiosk:pairing.footer', 'OpenFamily Smart Display')} • {window.location.hostname}
                 </div>
             </div>
         );
@@ -663,13 +745,13 @@ const Kiosk: React.FC = () => {
                             <div>
                                 <div className="flex items-center gap-2">
                                     <span className="font-serif text-lg font-bold text-foreground">
-                                        {soundsState.activePreset ? t(soundsState.activePreset.nameKey) : 'Sons Relaxantes Ativos'}
+                                        {soundsState.activePreset ? t(soundsState.activePreset.nameKey) : t('kiosk:ambientSounds.active', 'Sons Relaxantes Ativos')}
                                     </span>
                                     <span className="rounded-full bg-primary/20 px-2.5 py-0.5 font-mono text-micro font-bold text-primary">
-                                        {soundsState.activeCount} som(ns)
+                                        {t('kiosk:ambientSounds.soundCount', { count: soundsState.activeCount, defaultValue: `${soundsState.activeCount} som(ns)` })}
                                     </span>
                                 </div>
-                                <p className="text-caption text-muted-foreground">Tocando no ambiente em segundo plano</p>
+                                <p className="text-caption text-muted-foreground">{t('kiosk:ambientSounds.playingSub', 'Tocando no ambiente em segundo plano')}</p>
                             </div>
                         </div>
 
@@ -680,7 +762,7 @@ const Kiosk: React.FC = () => {
                                 onClick={() => soundEngine.nextPreset()}
                                 className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-2 text-caption font-semibold text-foreground hover:bg-surface-3 transition-colors active:scale-95"
                             >
-                                <SkipForward className="h-4 w-4 text-primary" /> Trocar Preset
+                                <SkipForward className="h-4 w-4 text-primary" /> {t('kiosk:ambientSounds.nextPreset', 'Trocar Preset')}
                             </button>
 
                             {/* Stop */}
@@ -689,7 +771,7 @@ const Kiosk: React.FC = () => {
                                 onClick={() => soundEngine.stopAll()}
                                 className="flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-2 text-caption font-semibold text-destructive hover:bg-destructive/20 transition-colors active:scale-95"
                             >
-                                <Square className="h-4 w-4" /> Parar
+                                <Square className="h-4 w-4" /> {t('kiosk:ambientSounds.stop', 'Parar')}
                             </button>
                         </div>
                     </div>
@@ -992,9 +1074,9 @@ const Kiosk: React.FC = () => {
                             <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
                                 <div>
                                     <p className="text-caption font-medium flex items-center gap-1.5">
-                                        <Moon className="h-4 w-4 text-primary" /> Modo Escuro (Dark Mode)
+                                        <Moon className="h-4 w-4 text-primary" /> {t('kiosk:displaySettings.darkMode', 'Modo Escuro (Dark Mode)')}
                                     </p>
-                                    <p className="mt-0.5 text-micro text-muted-foreground">Recomendado para telas de TV e visibilidade noturna</p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">{t('kiosk:displaySettings.darkModeHint', 'Recomendado para telas de TV e visibilidade noturna')}</p>
                                 </div>
                                 <button
                                     type="button"
@@ -1017,9 +1099,9 @@ const Kiosk: React.FC = () => {
                             <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
                                 <div>
                                     <p className="text-caption font-medium flex items-center gap-1.5">
-                                        <ZoomIn className="h-4 w-4 text-primary" /> Zoom / Tamanho da Tela
+                                        <ZoomIn className="h-4 w-4 text-primary" /> {t('kiosk:displaySettings.zoom', 'Zoom / Tamanho da Tela')}
                                     </p>
-                                    <p className="mt-0.5 text-micro text-muted-foreground">Ajuste a escala dos elementos para sua TV</p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">{t('kiosk:displaySettings.zoomHint', 'Ajuste a escala dos elementos para sua TV')}</p>
                                 </div>
                                 <div className="flex items-center gap-1.5 bg-surface-2 p-1 rounded-input border border-border">
                                     <button
@@ -1048,9 +1130,9 @@ const Kiosk: React.FC = () => {
                             <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
                                 <div>
                                     <p className="text-caption font-medium flex items-center gap-1.5">
-                                        <Sun className="h-4 w-4 text-primary" /> Brilho Noturno (Dimmer)
+                                        <Sun className="h-4 w-4 text-primary" /> {t('kiosk:displaySettings.brightness', 'Brilho Noturno (Dimmer)')}
                                     </p>
-                                    <p className="mt-0.5 text-micro text-muted-foreground">Reduza a luminosidade da TV à noite</p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">{t('kiosk:displaySettings.brightnessHint', 'Reduza a luminosidade da TV à noite')}</p>
                                 </div>
                                 <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-input border border-border">
                                     {[100, 75, 50, 30, 15].map((lvl) => (
@@ -1075,7 +1157,7 @@ const Kiosk: React.FC = () => {
                             <div className="border-t border-border pt-4">
                                 <div className="flex items-center justify-between gap-3 mb-2">
                                     <p className="text-caption font-medium flex items-center gap-1.5">
-                                        <Tv className="h-4 w-4 text-primary" /> Link Kiosk da TV
+                                        <Tv className="h-4 w-4 text-primary" /> {t('kiosk:displaySettings.kioskLink', 'Link Kiosk da TV')}
                                     </p>
                                     {!kioskToken && (
                                         <button
@@ -1083,7 +1165,7 @@ const Kiosk: React.FC = () => {
                                             onClick={loadKioskToken}
                                             className="text-micro font-medium text-primary underline-offset-2 hover:underline"
                                         >
-                                            Gerar Token Perm.
+                                            {t('kiosk:displaySettings.generateToken', 'Gerar Token Perm.')}
                                         </button>
                                     )}
                                 </div>
@@ -1104,7 +1186,7 @@ const Kiosk: React.FC = () => {
                                             className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-input border border-primary/30 bg-primary/10 text-primary text-micro font-medium hover:bg-primary/20 transition-colors"
                                         >
                                             {copiedToken ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                                            {copiedToken ? 'Copiado!' : 'Copiar URL para TV'}
+                                            {copiedToken ? t('kiosk:displaySettings.copied', 'Copiado!') : t('kiosk:displaySettings.copyUrl', 'Copiar URL para TV')}
                                         </button>
                                     </div>
                                 )}
@@ -1113,14 +1195,14 @@ const Kiosk: React.FC = () => {
                                     download
                                     className="flex items-center justify-center gap-2 w-full mt-3 py-2 rounded-input border border-primary/40 bg-primary/10 text-primary font-semibold text-caption hover:bg-primary/20 transition-colors"
                                 >
-                                    <Download className="h-4 w-4" /> Baixar App Android TV (APK)
+                                    <Download className="h-4 w-4" /> {t('kiosk:displaySettings.downloadApk', 'Baixar App Android TV (APK)')}
                                 </a>
                             </div>
 
                             {/* Language Selector */}
                             <div className="border-t border-border pt-4 space-y-2">
                                 <p className="text-caption font-medium flex items-center gap-1.5">
-                                    <Globe className="h-4 w-4 text-primary" /> Idioma / Language
+                                    <Globe className="h-4 w-4 text-primary" /> {t('kiosk:displaySettings.language', 'Idioma / Language')}
                                 </p>
                                 <div className="grid grid-cols-2 gap-2">
                                     {[
@@ -1155,7 +1237,7 @@ const Kiosk: React.FC = () => {
                                 onClick={() => setSettingsOpen(false)}
                                 className="flex items-center gap-2 rounded-input bg-primary px-5 py-2.5 text-caption font-bold text-primary-foreground shadow transition-colors active:scale-95"
                             >
-                                <X className="h-4 w-4" /> Fechar Configurações
+                                <X className="h-4 w-4" /> {t('kiosk:displaySettings.closeButton', 'Fechar Configurações')}
                             </button>
                         </div>
                     </div>
@@ -1166,58 +1248,75 @@ const Kiosk: React.FC = () => {
             {soundsOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={() => setSoundsOpen(false)} />
-                    <div className="relative w-full max-w-lg rounded-card border border-border bg-card p-6 shadow-2xl">
-                        <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-card border border-border bg-card shadow-2xl">
+                        {/* Sticky Header with Close button (always visible on TV / small viewports) */}
+                        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border bg-card p-4">
                             <div className="flex items-center gap-2">
                                 <Sparkles className="h-6 w-6 text-primary" />
-                                <h2 className="font-serif text-h2">Sons Relaxantes & Ruídos</h2>
+                                <h2 className="font-serif text-h2">{t('kiosk:ambientSounds.title', 'Sons Relaxantes & Ruídos')}</h2>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setSoundsOpen(false)}
-                                aria-label="Fechar"
-                                className="rounded-input p-2 text-muted-foreground active:bg-surface-2"
+                                aria-label={t('kiosk:ambientSounds.close', 'Fechar')}
+                                className="rounded-input border border-border bg-surface-2 p-2 text-foreground transition-colors hover:bg-surface-3"
                             >
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
 
-                        <p className="mb-4 text-caption text-muted-foreground">
-                            Sons sintetizados em segundo plano para sono, relaxamento e acalmar cães e gatos.
-                        </p>
+                        {/* Scrollable Body */}
+                        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                            <p className="text-caption text-muted-foreground">
+                                {t('kiosk:ambientSounds.subtitle', 'Sons sintetizados em segundo plano para sono, relaxamento e acalmar cães e gatos.')}
+                            </p>
 
-                        {/* Presets Grid */}
-                        <div className="mb-5 grid grid-cols-2 gap-2.5">
-                            {PRESETS.map((preset: PresetDef) => (
-                                <button
-                                    key={preset.id}
-                                    type="button"
-                                    onClick={() => soundEngine.applyPreset(preset)}
-                                    className="flex items-center gap-2.5 rounded-input border border-border bg-surface p-3 text-left hover:border-primary active:scale-[0.98] transition-all"
-                                >
-                                    <span className="text-xl">{preset.icon}</span>
-                                    <span className="text-caption font-semibold">{t(preset.nameKey)}</span>
-                                </button>
-                            ))}
+                            {/* Presets Grid */}
+                            <div className="grid grid-cols-2 gap-2.5">
+                                {PRESETS.map((preset: PresetDef) => (
+                                    <button
+                                        key={preset.id}
+                                        type="button"
+                                        onClick={() => soundEngine.applyPreset(preset)}
+                                        className="flex items-center gap-2.5 rounded-input border border-border bg-surface p-3 text-left hover:border-primary active:scale-[0.98] transition-all"
+                                    >
+                                        <span className="text-xl">{preset.icon}</span>
+                                        <span className="text-caption font-semibold">{t(preset.nameKey)}</span>
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Controls */}
+                            {soundsState.anyActive ? (
+                                <div className="flex items-center justify-between border-t border-border pt-4">
+                                    <span className="text-caption font-bold text-primary animate-pulse">
+                                        🎵 {t('kiosk:ambientSounds.playing', 'Tocando em segundo plano')}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => soundEngine.stopAll()}
+                                        className="flex items-center gap-1.5 rounded-input bg-destructive/10 px-3 py-1.5 text-caption font-medium text-destructive active:bg-destructive/20"
+                                    >
+                                        <Square className="h-4 w-4" /> {t('kiosk:ambientSounds.stop', 'Parar Sons')}
+                                    </button>
+                                </div>
+                            ) : (
+                                <p className="text-center text-caption text-muted-foreground border-t border-border pt-4">
+                                    {t('kiosk:ambientSounds.startHint', 'Toque em um preset para iniciar o som na TV')}
+                                </p>
+                            )}
                         </div>
 
-                        {/* Controls */}
-                        {soundsState.anyActive ? (
-                            <div className="flex items-center justify-between border-t border-border pt-4">
-                                <span className="text-caption font-bold text-primary animate-pulse">🎵 Tocando em segundo plano</span>
-                                <button
-                                    type="button"
-                                    onClick={() => soundEngine.stopAll()}
-                                    className="flex items-center gap-1.5 rounded-input bg-destructive/10 px-3 py-1.5 text-caption font-medium text-destructive active:bg-destructive/20"
-                                >
-                                    <Square className="h-4 w-4" /> Parar Sons
-                                </button>
-                            </div>
-                        ) : (
-                            <p className="text-center text-caption text-muted-foreground border-t border-border pt-4">
-                                Toque em um preset para iniciar o som na TV
-                            </p>
-                        )}
+                        {/* Sticky Footer with Close button */}
+                        <div className="sticky bottom-0 z-20 flex shrink-0 items-center justify-end border-t border-border bg-card p-3">
+                            <button
+                                type="button"
+                                onClick={() => setSoundsOpen(false)}
+                                className="flex items-center gap-2 rounded-input bg-primary px-5 py-2.5 text-caption font-bold text-primary-foreground shadow transition-colors active:scale-95"
+                            >
+                                <X className="h-4 w-4" /> {t('kiosk:ambientSounds.close', 'Fechar')}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

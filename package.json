@@ -23,6 +23,8 @@
     "docker:down": "docker-compose down",
     "docker:build": "docker-compose build",
     "smoke:api": "bash ./scripts/smoke-api.sh",
+    "test": "node tests/e2e/runner.js",
+    "test:e2e": "node tests/e2e/runner.js",
     "install:all": "npm install && cd client && npm install && cd ../server && npm install && cd ../shared && npm install"
   },
   "devDependencies": {

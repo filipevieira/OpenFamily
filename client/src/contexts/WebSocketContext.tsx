@@ -24,17 +24,20 @@ export type WsEntity =
     | 'notifications'
     | 'integrations'
     | 'rewards'
-    | 'notes';
+    | 'notes'
+    | 'kiosk';
 
-export type WsAction = 'created' | 'updated' | 'deleted';
+export type WsAction = 'created' | 'updated' | 'deleted' | 'synced';
 
 export interface WsUpdateMessage {
     type: 'update';
     entity: WsEntity;
     action: WsAction;
+    id?: string;
+    data?: any;
 }
 
-type Subscriber = () => void;
+type Subscriber = (msg?: WsUpdateMessage) => void;
 
 interface WebSocketContextType {
     /** Subscribe to updates for a given entity. Returns an unsubscribe function. */
@@ -68,10 +71,10 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
     const unmounted = useRef(false);
 
     // Notify all subscribers for a given entity
-    const notify = useCallback((entity: WsEntity) => {
+    const notify = useCallback((entity: WsEntity, msg?: WsUpdateMessage) => {
         const cbs = subscribers.current.get(entity);
         if (cbs) {
-            cbs.forEach((cb) => cb());
+            cbs.forEach((cb) => cb(msg));
         }
     }, []);
 
@@ -83,7 +86,8 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
 
     const connect = useCallback(() => {
-        if (unmounted.current || !user || IS_DEMO) return;
+        const token = api.getToken();
+        if (unmounted.current || (!user && !token) || IS_DEMO) return;
 
         // Close any existing socket
         if (wsRef.current) {
@@ -113,7 +117,7 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
             try {
                 const msg = JSON.parse(event.data as string) as WsUpdateMessage;
                 if (msg.type === 'update' && msg.entity) {
-                    notify(msg.entity);
+                    notify(msg.entity, msg);
                 }
             } catch {
                 // ignore malformed frames
@@ -140,11 +144,11 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
         };
     }, [user, notify]);
 
-    // Connect when user is available, disconnect on logout
+    // Connect when user or token is available, disconnect on logout
     useEffect(() => {
         unmounted.current = false;
 
-        if (user) {
+        if (user || api.getToken()) {
             connect();
         }
 

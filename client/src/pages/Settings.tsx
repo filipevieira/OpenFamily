@@ -1,16 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
-import { Download, Upload, CheckCircle, AlertCircle, Loader2, Bell, BellOff, Globe, Languages, Camera, Trash2, MonitorPlay, Sparkles, LayoutGrid, Server, Tags, ArrowUp, ArrowDown, Plus, Heart, Star } from 'lucide-react';
-import { Card, CardContent, Button, Input, Select } from '../components/ui';
+import { Download, Upload, CheckCircle, AlertCircle, Loader2, Bell, BellOff, Globe, Languages, Camera, Trash2, MonitorPlay, Sparkles, LayoutGrid, Server, Tags, ArrowUp, ArrowDown, Plus, Heart, Star, Tv, Tablet, Smartphone, Wifi, Clock, RefreshCw } from 'lucide-react';
+import { Card, CardContent, Button, Input, Select, Badge, useToast } from '../components/ui';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { useNotifications } from '../hooks/useNotifications';
 import { useAuth } from '../contexts/AuthContext';
+import { useWebSocket } from '../contexts/WebSocketContext';
 import { isNative, getServerUrl, clearServerUrl } from '../lib/serverConfig';
 import { useCategories, CATEGORY_MODULES, type CategoryModule } from '../hooks/useCategories';
 import { refreshAiStatus } from '../lib/aiStatus';
 import { aiErrorKey } from '../components/app/MagicInput';
+import { cn, formatDate, formatTime } from '../lib/utils';
+import type { KioskDevice } from '@openfamily/shared';
 
 interface ImportCounts {
     family_members?: number;
@@ -643,6 +646,263 @@ const CategoriesCard: React.FC<{ isParent: boolean }> = ({ isParent }) => {
     );
 };
 
+// "Kiosk Devices" card — lists linked kiosk screens and allows parents to revoke/unlink them
+const KioskDevicesCard: React.FC<{ isParent: boolean }> = ({ isParent }) => {
+    const { t } = useTranslation(['kiosk', 'common', 'settings']);
+    const { showToast } = useToast();
+    const { subscribe } = useWebSocket();
+
+    const [devices, setDevices] = useState<KioskDevice[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
+    const [confirmId, setConfirmId] = useState<string | null>(null);
+
+    const fetchDevices = useCallback(async (isManual = false) => {
+        if (isManual) setRefreshing(true);
+        try {
+            const data = await api.get<KioskDevice[]>('/api/kiosk/devices');
+            setDevices(Array.isArray(data) ? data : []);
+            setError(null);
+        } catch (err: unknown) {
+            console.error('Failed to fetch kiosk devices:', err);
+            setError(err instanceof Error ? err.message : t('kiosk:settings.fetchError'));
+        } finally {
+            setLoading(false);
+            if (isManual) setRefreshing(false);
+        }
+    }, [t]);
+
+    useEffect(() => {
+        void fetchDevices();
+    }, [fetchDevices]);
+
+    // WebSocket real-time subscription for kiosk updates
+    useEffect(() => {
+        const unsubscribe = subscribe('kiosk' as any, () => {
+            void fetchDevices();
+        });
+        return unsubscribe;
+    }, [subscribe, fetchDevices]);
+
+    const handleUnlink = async (deviceId: string) => {
+        setUnlinkingId(deviceId);
+        try {
+            await api.delete(`/api/kiosk/devices/${deviceId}`);
+            setDevices((prev) => prev.filter((d) => d.id !== deviceId));
+            showToast({
+                title: t('kiosk:settings.unlinkSuccess'),
+            });
+            void fetchDevices();
+        } catch (err: unknown) {
+            console.error('Failed to unlink kiosk device:', err);
+            showToast({
+                title: t('kiosk:settings.unlinkError'),
+                description: err instanceof Error ? err.message : undefined,
+            });
+        } finally {
+            setUnlinkingId(null);
+            setConfirmId(null);
+        }
+    };
+
+    const formatLastActive = (dateVal?: Date | string | null): string => {
+        if (!dateVal) return t('kiosk:settings.neverActive');
+        const d = typeof dateVal === 'string' ? new Date(dateVal) : dateVal;
+        if (isNaN(d.getTime())) return t('kiosk:settings.neverActive');
+        const diffMs = Date.now() - d.getTime();
+        const diffSecs = Math.max(0, Math.floor(diffMs / 1000));
+        if (diffSecs < 60) return t('kiosk:settings.justNow');
+        const diffMins = Math.floor(diffSecs / 60);
+        if (diffMins < 60) return t('kiosk:settings.minsAgo', { count: diffMins });
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return t('kiosk:settings.hoursAgo', { count: diffHours });
+        return `${formatDate(d)} ${formatTime(d)}`;
+    };
+
+    const getDeviceIcon = (deviceType?: string, deviceName?: string) => {
+        const combined = `${deviceType || ''} ${deviceName || ''}`.toLowerCase();
+        if (combined.includes('tv') || combined.includes('tizen') || combined.includes('webos') || combined.includes('roku') || combined.includes('bravia')) {
+            return <Tv className="h-5 w-5 text-primary" />;
+        }
+        if (combined.includes('tablet') || combined.includes('ipad')) {
+            return <Tablet className="h-5 w-5 text-primary" />;
+        }
+        if (combined.includes('mobile') || combined.includes('phone') || combined.includes('android') || combined.includes('iphone')) {
+            return <Smartphone className="h-5 w-5 text-primary" />;
+        }
+        return <MonitorPlay className="h-5 w-5 text-primary" />;
+    };
+
+    return (
+        <Card>
+            <CardContent className="p-6">
+                <div className="flex items-start gap-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-primary-soft text-primary">
+                        <MonitorPlay className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div>
+                                <h3 className="text-caption font-semibold text-foreground">{t('kiosk:settings.title')}</h3>
+                                <p className="mt-1 text-micro text-muted-foreground">{t('kiosk:settings.subtitle')}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => void fetchDevices(true)}
+                                    disabled={loading || refreshing}
+                                    title={t('kiosk:settings.refresh')}
+                                >
+                                    <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+                                </Button>
+                                <Link to="/kiosk" target="_blank" rel="noopener noreferrer">
+                                    <Button variant="secondary" size="sm">
+                                        <MonitorPlay className="mr-2 h-4 w-4" />
+                                        {t('kiosk:settings.open')}
+                                    </Button>
+                                </Link>
+                            </div>
+                        </div>
+
+                        {error && (
+                            <div className="mt-4 flex items-center gap-2 rounded-input border border-destructive/20 bg-destructive/10 p-3 text-micro text-destructive">
+                                <AlertCircle className="h-4 w-4 shrink-0" />
+                                <span>{error}</span>
+                            </div>
+                        )}
+
+                        {loading ? (
+                            <div className="mt-6 flex items-center justify-center gap-2 py-6 text-micro text-muted-foreground">
+                                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                <span>{t('common:states.loading')}</span>
+                            </div>
+                        ) : devices.length === 0 ? (
+                            <div className="mt-6 flex flex-col items-center justify-center rounded-card border border-dashed border-border bg-surface-1/40 p-8 text-center">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-muted-foreground">
+                                    <MonitorPlay className="h-6 w-6" />
+                                </div>
+                                <h4 className="mt-3 text-caption font-semibold text-foreground">
+                                    {t('kiosk:settings.noDevices')}
+                                </h4>
+                                <p className="mt-1 max-w-md text-micro text-muted-foreground">
+                                    {t('kiosk:settings.noDevicesDesc')}
+                                </p>
+                                <Link to="/kiosk" className="mt-4">
+                                    <Button variant="primary" size="sm">
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        {t('kiosk:settings.pairNew')}
+                                    </Button>
+                                </Link>
+                            </div>
+                        ) : (
+                            <div className="mt-6 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-micro font-medium uppercase tracking-wider text-muted-foreground">
+                                        {t('kiosk:settings.devicesList')} ({devices.length})
+                                    </span>
+                                </div>
+                                {devices.map((device) => {
+                                    const devName = device.deviceName || device.device_name || 'Display';
+                                    const devType = device.deviceType || device.device_type || 'Universal Kiosk Display';
+                                    const ip = device.ipAddress || device.ip_address;
+                                    const lastActive = device.lastActiveAt || device.last_active_at;
+                                    const isUnlinking = unlinkingId === device.id;
+                                    const isConfirming = confirmId === device.id;
+
+                                    return (
+                                        <div
+                                            key={device.id}
+                                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-card border border-border bg-card p-4 transition hover:border-primary/30"
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-input bg-primary-soft">
+                                                    {getDeviceIcon(devType, devName)}
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="text-caption font-semibold text-foreground">
+                                                            {devName}
+                                                        </span>
+                                                        <Badge variant="secondary" className="text-micro">
+                                                            {devType}
+                                                        </Badge>
+                                                        <Badge variant="success" className="text-micro">
+                                                            <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                                                            {t('kiosk:settings.statusActive')}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-muted-foreground">
+                                                        {ip && (
+                                                            <span className="flex items-center gap-1">
+                                                                <Wifi className="h-3 w-3" />
+                                                                {ip}
+                                                            </span>
+                                                        )}
+                                                        <span className="flex items-center gap-1">
+                                                            <Clock className="h-3 w-3" />
+                                                            {t('kiosk:settings.lastActive')}: {formatLastActive(lastActive)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center self-end sm:self-center gap-2">
+                                                {isConfirming ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-micro text-destructive font-medium hidden md:inline">
+                                                            {t('kiosk:settings.unlinkConfirmTitle')}
+                                                        </span>
+                                                        <Button
+                                                            variant="destructive"
+                                                            size="sm"
+                                                            disabled={isUnlinking}
+                                                            onClick={() => void handleUnlink(device.id)}
+                                                        >
+                                                            {isUnlinking ? (
+                                                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                                            ) : (
+                                                                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                                            )}
+                                                            {t('kiosk:settings.unlink')}
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            disabled={isUnlinking}
+                                                            onClick={() => setConfirmId(null)}
+                                                        >
+                                                            {t('common:actions.cancel')}
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        disabled={!isParent || isUnlinking}
+                                                        onClick={() => setConfirmId(device.id)}
+                                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                                        title={!isParent ? t('kiosk:settings.parentOnly') : undefined}
+                                                    >
+                                                        <Trash2 className="mr-1.5 h-4 w-4" />
+                                                        {t('kiosk:settings.unlink')}
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    );
+};
+
 const Settings: React.FC = () => {
     const { t } = useTranslation(['settings', 'common', 'kiosk', 'server']);
     const entityLabel = (key: string) => t(`settings:entities.${key}`, { defaultValue: key });
@@ -857,25 +1117,7 @@ const Settings: React.FC = () => {
             )}
 
             {/* Kiosk display */}
-            <Card>
-                <CardContent className="p-6">
-                    <div className="flex items-start gap-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-primary-soft text-primary">
-                            <MonitorPlay className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1">
-                            <h3 className="text-caption font-semibold text-foreground">{t('kiosk:settings.title')}</h3>
-                            <p className="mt-1 text-micro text-muted-foreground">{t('kiosk:settings.subtitle')}</p>
-                            <Link to="/kiosk">
-                                <Button variant="secondary" size="sm" className="mt-4">
-                                    <MonitorPlay className="mr-2 h-4 w-4" />
-                                    {t('kiosk:settings.open')}
-                                </Button>
-                            </Link>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
+            <KioskDevicesCard isParent={isParent} />
 
             {/* Profile photo */}
             <Card>

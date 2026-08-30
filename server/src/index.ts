@@ -30,8 +30,13 @@ wss.on('connection', (ws: WebSocket) => {
 
             if (data.type === 'auth' && typeof data.token === 'string') {
                 try {
-                    const decoded = jwt.verify(data.token, getJwtSecret()) as { userId: string };
-                    userId = decoded.userId;
+                    const decoded = jwt.verify(data.token, getJwtSecret()) as {
+                        userId: string;
+                        ownerId?: string;
+                        deviceId?: string;
+                        isKiosk?: boolean;
+                    };
+                    userId = decoded.ownerId ?? decoded.userId;
 
                     if (!clients.has(userId)) {
                         clients.set(userId, new Set());

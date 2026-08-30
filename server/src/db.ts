@@ -366,6 +366,23 @@ export const runMigrations = async () => {
         'ALTER TABLE appointments ADD COLUMN IF NOT EXISTS google_event_id VARCHAR(255)',
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS sync_source VARCHAR(30) DEFAULT 'local'",
         'CREATE INDEX IF NOT EXISTS idx_appointments_google_id ON appointments(google_event_id)',
+        // Migration 023: Kiosk devices registry & remote revocation
+        `CREATE TABLE IF NOT EXISTS kiosk_devices (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            device_name VARCHAR(100) NOT NULL,
+            device_type VARCHAR(100),
+            user_agent TEXT,
+            ip_address VARCHAR(45),
+            device_token TEXT,
+            last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        'CREATE INDEX IF NOT EXISTS idx_kiosk_devices_user ON kiosk_devices(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_kiosk_devices_user_id ON kiosk_devices(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_kiosk_devices_user_active ON kiosk_devices(user_id) WHERE revoked_at IS NULL',
+        'CREATE INDEX IF NOT EXISTS idx_kiosk_devices_revoked_at ON kiosk_devices(revoked_at)',
     ];
 
     for (const migration of migrations) {

@@ -190,3 +190,25 @@ export interface DashboardStats {
     thisMonthExpenses: number;
     budgetAlerts: number;
 }
+
+// Kiosk Device
+export interface KioskDevice {
+    id: string;
+    userId: string;
+    deviceName: string;
+    deviceType?: string;
+    userAgent?: string;
+    ipAddress?: string;
+    lastActiveAt?: Date | string;
+    createdAt: Date | string;
+    revokedAt?: Date | string;
+    user_id?: string;
+    device_name?: string;
+    device_type?: string;
+    user_agent?: string;
+    ip_address?: string;
+    last_active_at?: Date | string;
+    created_at?: Date | string;
+    revoked_at?: Date | string;
+}
+

@@ -10,9 +10,11 @@ export interface AuthRequest extends Request {
     actualUserId?: string;
     /** True when the logged-in user IS the family owner (or a standalone user) */
     isOwner?: boolean;
+    /** Device ID associated with Kiosk tokens */
+    deviceId?: string;
 }
 
-export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
         const authHeader = req.headers.authorization;
         let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -25,10 +27,40 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
             return res.status(401).json({ success: false, error: 'No token provided' });
         }
 
-        const decoded = jwt.verify(token, getJwtSecret()) as { userId: string; ownerId?: string; isKiosk?: boolean };
+        const decoded = jwt.verify(token, getJwtSecret()) as {
+            userId: string;
+            ownerId?: string;
+            deviceId?: string;
+            isKiosk?: boolean;
+        };
         req.actualUserId = decoded.userId;
         req.userId = decoded.ownerId ?? decoded.userId;
         req.isOwner = !decoded.ownerId || decoded.ownerId === decoded.userId;
+        req.deviceId = decoded.deviceId;
+
+        if (decoded.isKiosk) {
+            if (!decoded.deviceId) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Legacy kiosk session expired. Please re-pair your display.',
+                    code: 'LEGACY_KIOSK_TOKEN',
+                });
+            }
+
+            const result = await query(
+                'SELECT id, revoked_at FROM kiosk_devices WHERE id = $1 AND user_id = $2',
+                [decoded.deviceId, req.userId]
+            );
+
+            if (result.rows.length === 0 || result.rows[0].revoked_at !== null) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Kiosk device has been unlinked or revoked',
+                    code: 'DEVICE_REVOKED',
+                });
+            }
+        }
+
         next();
     } catch (error) {
         return res.status(401).json({ success: false, error: 'Invalid token' });
@@ -39,8 +71,12 @@ export const generateToken = (userId: string, ownerId?: string): string => {
     return jwt.sign({ userId, ownerId: ownerId ?? userId }, getJwtSecret(), { expiresIn: '7d' });
 };
 
-export const generateKioskToken = (userId: string, ownerId?: string): string => {
-    return jwt.sign({ userId, ownerId: ownerId ?? userId, isKiosk: true }, getJwtSecret(), { expiresIn: '3650d' });
+export const generateKioskToken = (userId: string, ownerId?: string, deviceId?: string): string => {
+    return jwt.sign(
+        { userId, ownerId: ownerId ?? userId, deviceId, isKiosk: true },
+        getJwtSecret(),
+        { expiresIn: '3650d' }
+    );
 };
 
 /**

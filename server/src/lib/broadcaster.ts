@@ -12,7 +12,8 @@ export type WsEntity =
     | 'notifications'
     | 'integrations'
     | 'rewards'
-    | 'notes';
+    | 'notes'
+    | 'kiosk';
 
 export type WsAction = 'created' | 'updated' | 'deleted' | 'synced';
 
@@ -20,6 +21,8 @@ export interface WsUpdatePayload {
     type: 'update';
     entity: WsEntity;
     action: WsAction;
+    id?: string;
+    data?: any;
 }
 
 /** Registered WebSocket connections keyed by userId */

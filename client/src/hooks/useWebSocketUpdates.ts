@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useWebSocket, WsEntity } from '../contexts/WebSocketContext';
+import { useWebSocket, WsEntity, WsUpdateMessage } from '../contexts/WebSocketContext';
 
 /**
  * Subscribe to real-time updates for a specific entity.
@@ -11,7 +11,7 @@ import { useWebSocket, WsEntity } from '../contexts/WebSocketContext';
  * @example
  * useWebSocketUpdates('tasks', loadTasks);
  */
-export function useWebSocketUpdates(entity: WsEntity, onUpdate: () => void): void {
+export function useWebSocketUpdates(entity: WsEntity, onUpdate: (msg?: WsUpdateMessage) => void): void {
     const { subscribe } = useWebSocket();
 
     // Always store the latest callback without re-subscribing
@@ -21,7 +21,7 @@ export function useWebSocketUpdates(entity: WsEntity, onUpdate: () => void): voi
     });
 
     useEffect(() => {
-        const unsubscribe = subscribe(entity, () => onUpdateRef.current());
+        const unsubscribe = subscribe(entity, (msg) => onUpdateRef.current(msg));
         return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [entity, subscribe]);
