@@ -163,6 +163,49 @@ const Kiosk: React.FC = () => {
     const [dismissedNotes, setDismissedNotes] = useState<{ id: string; content: string }[]>([]);
     const noteTimers = useRef(new Map<string, number>());
 
+    const [pairingCode, setPairingCode] = useState<string | null>(null);
+    const [hasToken, setHasToken] = useState<boolean>(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        return Boolean(urlParams.get('token') || api.getToken() || localStorage.getItem('openfamily.kioskToken'));
+    });
+
+    // TV Pairing (Netflix / HBO style) when no token is present
+    useEffect(() => {
+        if (hasToken) return;
+
+        let pollInterval: number;
+
+        const startPairing = async () => {
+            try {
+                const res = await api.post<{ success: boolean; code: string }>('/api/kiosk/pair/init', {});
+                if (res.success && res.code) {
+                    setPairingCode(res.code);
+
+                    pollInterval = window.setInterval(async () => {
+                        try {
+                            const statusRes = await api.get<{ success: boolean; authorized: boolean; token?: string; expired?: boolean }>(`/api/kiosk/pair/status?code=${res.code}`);
+                            if (statusRes.success && statusRes.authorized && statusRes.token) {
+                                clearInterval(pollInterval);
+                                api.setToken(statusRes.token);
+                                localStorage.setItem('openfamily.kioskToken', statusRes.token);
+                                setHasToken(true);
+                            } else if (statusRes.expired) {
+                                clearInterval(pollInterval);
+                                void startPairing();
+                            }
+                        } catch { /* glitch */ }
+                    }, 2000);
+                }
+            } catch { /* offline */ }
+        };
+
+        void startPairing();
+
+        return () => {
+            if (pollInterval) clearInterval(pollInterval);
+        };
+    }, [hasToken]);
+
     useEffect(() => {
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -386,6 +429,87 @@ const Kiosk: React.FC = () => {
             : 'border-border bg-card text-muted-foreground hover:text-foreground hover:border-border-strong'
     );
 
+    if (!hasToken) {
+        return (
+            <div className="min-h-screen bg-[#110a18] text-[#f2eaee] flex flex-col justify-between p-8 lg:p-14 select-none font-sans">
+                {/* Top Header */}
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <img src={`${import.meta.env.BASE_URL}OpenFamily.png`} alt="OpenFamily" className="h-12 w-12 object-contain" />
+                        <span className="font-serif text-3xl font-bold tracking-tight text-white">OpenFamily TV</span>
+                    </div>
+                    <div className="text-caption font-medium text-muted-foreground bg-surface/40 px-4 py-1.5 rounded-full border border-white/10">
+                        Modo Smart Display 42"
+                    </div>
+                </div>
+
+                {/* Main Content (Netflix / HBO style 2 Columns) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center max-w-6xl mx-auto w-full my-auto">
+                    <div className="space-y-8">
+                        <div className="space-y-3">
+                            <span className="text-primary font-bold uppercase tracking-widest text-caption">Autenticação Fácil de TV</span>
+                            <h1 className="text-4xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
+                                Conecte sua TV em segundos
+                            </h1>
+                            <p className="text-lg text-text-muted-base leading-relaxed">
+                                Não precisa usar o controle remoto para digitar sua senha. Use a câmera do seu celular!
+                            </p>
+                        </div>
+
+                        <div className="space-y-5 border-l-2 border-primary/40 pl-6">
+                            <div className="space-y-1">
+                                <span className="text-caption font-bold text-primary">PASSO 1</span>
+                                <p className="text-base text-white">Abra a câmera do seu celular</p>
+                            </div>
+                            <div className="space-y-1">
+                                <span className="text-caption font-bold text-primary">PASSO 2</span>
+                                <p className="text-base text-white">Aponte para o QR Code ao lado</p>
+                            </div>
+                            <div className="space-y-1">
+                                <span className="text-caption font-bold text-primary">PASSO 3</span>
+                                <p className="text-base text-white">Toque em <strong>"Autorizar esta TV"</strong> no celular</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-[#1b1126] border border-[#2c1e38] rounded-3xl p-8 flex flex-col items-center text-center shadow-2xl space-y-6">
+                        {pairingCode ? (
+                            <div className="bg-white p-4 rounded-2xl shadow-inner">
+                                <img
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(`${window.location.origin}/pair?code=${pairingCode}`)}`}
+                                    alt="QR Code de Pareamento"
+                                    className="w-60 h-60 object-contain"
+                                />
+                            </div>
+                        ) : (
+                            <div className="w-60 h-60 bg-surface-2 animate-pulse rounded-2xl flex items-center justify-center text-caption text-muted-foreground">
+                                Gerando QR Code...
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <p className="text-caption text-text-muted-foreground uppercase tracking-wider font-medium">Ou acesse no celular:</p>
+                            <p className="text-caption text-primary font-mono">{window.location.origin}/pair</p>
+                            <div className="text-4xl lg:text-5xl font-mono font-bold tracking-widest text-white bg-[#110a18] py-3 px-6 rounded-2xl border border-primary/30 shadow-inner">
+                                {pairingCode ? `${pairingCode.slice(0, 3)} - ${pairingCode.slice(3)}` : '...'}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-micro text-text-muted-base animate-pulse">
+                            <div className="w-2.5 h-2.5 rounded-full bg-primary" />
+                            <span>Aguardando autorização pelo celular...</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="text-center text-micro text-text-muted-base border-t border-white/5 pt-4">
+                    OpenFamily Smart Display • {window.location.hostname}
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="relative min-h-screen bg-background text-foreground">
             {/* Immich photo background (soft, dimmed, behind everything) */}
@@ -468,9 +592,9 @@ const Kiosk: React.FC = () => {
                 </div>
             </header>
 
-            <main className="grid grid-cols-1 gap-5 px-6 pb-10 pt-6 lg:grid-cols-3 lg:gap-6 lg:px-12">
-                {/* Schedule — wide column */}
-                <section className={cn(panelClass, 'lg:col-span-2 lg:p-8')}>
+            <main className="grid grid-cols-1 gap-6 px-6 pb-10 pt-6 xl:grid-cols-3 xl:gap-8 lg:px-12">
+                {/* Coluna 1: Agenda & Compromissos */}
+                <section className={cn(panelClass, 'xl:col-span-1 xl:p-7')}>
                     <h2 className="mb-5 flex items-center gap-3 font-serif text-h1">
                         <Calendar className="h-7 w-7 text-primary" /> {t('kiosk:schedule')}
                     </h2>
@@ -479,15 +603,15 @@ const Kiosk: React.FC = () => {
                     ) : (
                         <div className="divide-y divide-border">
                             {todayAppointments.map((a) => (
-                                <div key={a.id} className="grid grid-cols-[110px_1fr] items-baseline gap-4 py-4">
-                                    <div className="font-serif text-[clamp(1.4rem,2.4vw,2rem)] tabular-nums text-muted-foreground">
+                                <div key={a.id} className="grid grid-cols-[90px_1fr] items-baseline gap-3 py-3.5">
+                                    <div className="font-serif text-[clamp(1.3rem,2.2vw,1.8rem)] tabular-nums text-muted-foreground">
                                         {hhmm(a.start_time)}
                                     </div>
                                     <div className="min-w-0">
-                                        <p className="truncate text-[clamp(1.2rem,2.2vw,1.9rem)] font-semibold">{a.title}</p>
-                                        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-body text-muted-foreground">
+                                        <p className="truncate text-[clamp(1.1rem,2vw,1.6rem)] font-semibold">{a.title}</p>
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
                                             {a.location && (
-                                                <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4" />{a.location}</span>
+                                                <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{a.location}</span>
                                             )}
                                             {(a.family_members_data || []).map((m) => (
                                                 <span key={m.id} className="inline-flex items-center gap-1.5">
@@ -503,8 +627,8 @@ const Kiosk: React.FC = () => {
                     )}
                 </section>
 
-                {/* Right column */}
-                <div className="flex flex-col gap-5 lg:gap-6">
+                {/* Coluna 2: Refeições & Onde estão & Tarefas */}
+                <div className="flex flex-col gap-6">
                     {/* Meals */}
                     <section className={panelClass}>
                         <h2 className="mb-4 flex items-center gap-2.5 font-serif text-h2">
@@ -633,28 +757,30 @@ const Kiosk: React.FC = () => {
                     </section>
                 </div>
 
-                {/* Family notes — post-its, shown only when there's something on the fridge */}
-                {isModuleEnabled('notes') && (visibleNotes.length > 0 || dismissedNotes.length > 0) && (
-                    <section className={cn(panelClass, 'lg:col-span-3')}>
-                        <h2 className="mb-5 flex items-center gap-3 font-serif text-h1">
-                            <StickyNote className="h-7 w-7 text-primary" /> {t('notes:title')}
-                        </h2>
-                        {dismissedNotes.map((d) => (
-                            <div key={`done-${d.id}`} className="mb-3 flex items-center gap-3 rounded-input bg-success/10 px-3 py-2.5 text-success">
-                                <Check className="h-5 w-5 shrink-0" />
-                                <span className="min-w-0 flex-1 truncate line-through">{d.content}</span>
-                                <button
-                                    type="button"
-                                    onClick={() => undoNote(d.id)}
-                                    className="flex shrink-0 items-center gap-1.5 rounded-input px-2.5 py-1.5 text-caption font-medium underline-offset-2 active:underline"
-                                >
-                                    <Undo2 className="h-4 w-4" /> {t('kiosk:undo')}
-                                </button>
-                            </div>
-                        ))}
-                        <FamilyNotes notes={visibleNotes} variant="kiosk" onDismiss={dismissNote} />
-                    </section>
-                )}
+                {/* Coluna 3: Notas da Família & Extras */}
+                <div className="flex flex-col gap-6">
+                    {isModuleEnabled('notes') && (visibleNotes.length > 0 || dismissedNotes.length > 0) && (
+                        <section className={panelClass}>
+                            <h2 className="mb-4 flex items-center gap-2.5 font-serif text-h2">
+                                <StickyNote className="h-6 w-6 text-primary" /> {t('notes:title')}
+                            </h2>
+                            {dismissedNotes.map((d) => (
+                                <div key={`done-${d.id}`} className="mb-3 flex items-center gap-3 rounded-input bg-success/10 px-3 py-2.5 text-success">
+                                    <Check className="h-5 w-5 shrink-0" />
+                                    <span className="min-w-0 flex-1 truncate line-through">{d.content}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => undoNote(d.id)}
+                                        className="flex shrink-0 items-center gap-1.5 rounded-input px-2.5 py-1.5 text-caption font-medium underline-offset-2 active:underline"
+                                    >
+                                        <Undo2 className="h-4 w-4" /> {t('kiosk:undo')}
+                                    </button>
+                                </div>
+                            ))}
+                            <FamilyNotes notes={visibleNotes} variant="kiosk" onDismiss={dismissNote} />
+                        </section>
+                    )}
+                </div>
             </main>
             </div>
 

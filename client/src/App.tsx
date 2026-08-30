@@ -24,6 +24,8 @@ import Join from './pages/Join';
 import Integrations from './pages/Integrations';
 import GoogleCallback from './pages/GoogleCallback';
 
+import PairTV from './pages/PairTV';
+
 function App() {
     const { isAuthenticated, loading, isModuleEnabled } = useAuth();
     const { t } = useTranslation('common');
@@ -84,6 +86,7 @@ function App() {
                 <Route path="/settings/integrations/google/callback" element={<GoogleCallback />} />
                 <Route path="/integrations" element={moduleRoute('integrations', <Integrations />)} />
                 <Route path="/join" element={<Join />} />
+                <Route path="/pair" element={<PairTV />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
         </Layout>
