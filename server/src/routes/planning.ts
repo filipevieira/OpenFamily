@@ -690,7 +690,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
         await replaceParticipants(query, id, participantIds);
 
-        // Trigger instant Google Calendar update if connected
+        // Trigger instant Google Calendar update or creation if connected
         try {
             const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
             const gEventId = current.google_event_id;
@@ -703,6 +703,18 @@ router.put('/:id', async (req: AuthRequest, res) => {
                     startTime,
                     endTime,
                 });
+            } else {
+                const gres = await createGoogleCalendarEvent(accessToken, calendarId, {
+                    title: cleanedTitle,
+                    location: (req.body.location !== undefined ? toNullIfEmpty(req.body.location) : current.location) || undefined,
+                    notes: (req.body.notes !== undefined ? toNullIfEmpty(req.body.notes) : current.notes) || undefined,
+                    specificDate: specificDate || undefined,
+                    startTime,
+                    endTime,
+                });
+                if (gres.googleEventId) {
+                    await query("UPDATE schedule_entries SET google_event_id = $1, sync_source = 'google' WHERE id = $2", [gres.googleEventId, id]);
+                }
             }
         } catch {}
 

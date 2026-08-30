@@ -363,6 +363,9 @@ export const runMigrations = async () => {
             created_at TIMESTAMPTZ DEFAULT now(),
             PRIMARY KEY (entry_id, excluded_date)
         )`,
+        'ALTER TABLE appointments ADD COLUMN IF NOT EXISTS google_event_id VARCHAR(255)',
+        "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS sync_source VARCHAR(30) DEFAULT 'local'",
+        'CREATE INDEX IF NOT EXISTS idx_appointments_google_id ON appointments(google_event_id)',
     ];
 
     for (const migration of migrations) {

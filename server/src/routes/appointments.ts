@@ -3,6 +3,12 @@ import { query } from '../db';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { toNullIfEmpty } from '../lib/normalize';
 import { broadcast } from '../lib/broadcaster';
+import {
+    getValidAccessToken,
+    createGoogleCalendarEvent,
+    updateGoogleCalendarEvent,
+    deleteGoogleCalendarEvent,
+} from '../services/integrations/googlecalendar';
 
 const router = Router();
 router.use(authMiddleware);
@@ -109,6 +115,22 @@ router.post('/', async (req: AuthRequest, res) => {
             ]
         );
 
+        // Trigger instant Google Calendar creation if connected
+        try {
+            const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
+            const gres = await createGoogleCalendarEvent(accessToken, calendarId, {
+                title: cleanedTitle,
+                location: (toNullIfEmpty(location) as string | undefined) || undefined,
+                notes: (toNullIfEmpty(notes) as string | undefined) || undefined,
+                specificDate: typeof startTime === 'string' ? startTime.split('T')[0] : undefined,
+                startTime: typeof startTime === 'string' && startTime.includes('T') ? startTime.split('T')[1] : '09:00:00',
+                endTime: typeof end_time === 'string' && end_time.includes('T') ? end_time.split('T')[1] : undefined,
+            });
+            if (gres.googleEventId) {
+                await query("UPDATE appointments SET google_event_id = $1, sync_source = 'google' WHERE id = $2", [gres.googleEventId, result.rows[0].id]);
+            }
+        } catch {}
+
         const [enriched] = await enrichAppointmentsWithMembers([result.rows[0]], req.userId!);
         broadcast(req.userId!, { type: 'update', entity: 'appointments', action: 'created' });
         res.json({ success: true, data: enriched });
@@ -137,6 +159,9 @@ router.put('/:id', async (req: AuthRequest, res) => {
             reminder_1hour,
             notes,
         } = req.body;
+
+        const existingApt = await query('SELECT title, google_event_id, start_time, end_time, location, notes FROM appointments WHERE id = $1 AND user_id = $2', [id, req.userId]);
+        const currentApt = existingApt.rows[0];
 
         const updates: string[] = [];
         const values: any[] = [];
@@ -211,6 +236,44 @@ router.put('/:id', async (req: AuthRequest, res) => {
             return res.status(404).json({ success: false, error: 'Appointment not found' });
         }
 
+        // Trigger instant Google Calendar update if connected
+        try {
+            const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
+            const gEventId = currentApt?.google_event_id;
+            const updatedTitle = typeof title === 'string' ? title.trim() : (currentApt?.title || '');
+            const updatedStart = start_time || currentApt?.start_time;
+            const updatedEnd = end_time !== undefined ? end_time : currentApt?.end_time;
+            const updatedLoc = location !== undefined ? location : currentApt?.location;
+            const updatedNotes = notes !== undefined ? notes : currentApt?.notes;
+
+            const specificDate = typeof updatedStart === 'string' ? updatedStart.split('T')[0] : undefined;
+            const startTimeStr = typeof updatedStart === 'string' && updatedStart.includes('T') ? updatedStart.split('T')[1] : '09:00:00';
+            const endTimeStr = typeof updatedEnd === 'string' && updatedEnd.includes('T') ? updatedEnd.split('T')[1] : undefined;
+
+            if (gEventId) {
+                await updateGoogleCalendarEvent(accessToken, calendarId, gEventId, {
+                    title: updatedTitle,
+                    location: updatedLoc || undefined,
+                    notes: updatedNotes || undefined,
+                    specificDate,
+                    startTime: startTimeStr,
+                    endTime: endTimeStr,
+                });
+            } else {
+                const gres = await createGoogleCalendarEvent(accessToken, calendarId, {
+                    title: updatedTitle,
+                    location: updatedLoc || undefined,
+                    notes: updatedNotes || undefined,
+                    specificDate,
+                    startTime: startTimeStr,
+                    endTime: endTimeStr,
+                });
+                if (gres.googleEventId) {
+                    await query("UPDATE appointments SET google_event_id = $1, sync_source = 'google' WHERE id = $2", [gres.googleEventId, id]);
+                }
+            }
+        } catch {}
+
         const [enriched] = await enrichAppointmentsWithMembers([result.rows[0]], req.userId!);
         broadcast(req.userId!, { type: 'update', entity: 'appointments', action: 'updated' });
         res.json({ success: true, data: enriched });
@@ -229,6 +292,9 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     try {
         const { id } = req.params;
 
+        const existingApt = await query('SELECT google_event_id FROM appointments WHERE id = $1 AND user_id = $2', [id, req.userId]);
+        const gEventId = existingApt.rows[0]?.google_event_id;
+
         const result = await query(
             'DELETE FROM appointments WHERE id = $1 AND user_id = $2 RETURNING id',
             [id, req.userId]
@@ -236,6 +302,13 @@ router.delete('/:id', async (req: AuthRequest, res) => {
 
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Appointment not found' });
+        }
+
+        if (gEventId) {
+            try {
+                const { accessToken, calendarId } = await getValidAccessToken('', req.userId!);
+                await deleteGoogleCalendarEvent(accessToken, calendarId, gEventId);
+            } catch {}
         }
 
         broadcast(req.userId!, { type: 'update', entity: 'appointments', action: 'deleted' });

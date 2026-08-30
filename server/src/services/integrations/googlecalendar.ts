@@ -451,6 +451,31 @@ export async function syncGoogleCalendar(
                     imported++;
                 }
             }
+
+            // Also upsert into appointments table so Compromissos calendar stays 100% in sync
+            const startIso = specificDate ? `${specificDate}T${startTime}` : new Date().toISOString();
+            const endIso = specificDate ? `${specificDate}T${endTime}` : undefined;
+
+            const existingApt = await query(
+                `SELECT id FROM appointments WHERE user_id = $1 AND (google_event_id = $2 OR (title = $3 AND start_time = $4))`,
+                [familyId, event.id, title, startIso]
+            );
+
+            if (existingApt.rows.length > 0) {
+                await query(
+                    `UPDATE appointments
+                     SET title = $1, start_time = $2, end_time = $3, location = $4, notes = $5, google_event_id = $6, sync_source = 'google', updated_at = NOW()
+                     WHERE id = $7`,
+                    [title, startIso, endIso || null, location, notes, event.id, existingApt.rows[0].id]
+                );
+            } else {
+                await query(
+                    `INSERT INTO appointments
+                     (user_id, title, start_time, end_time, location, notes, google_event_id, sync_source)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, 'google')`,
+                    [familyId, title, startIso, endIso || null, location, notes, event.id]
+                );
+            }
         } catch (e) {
             errors++;
         }
