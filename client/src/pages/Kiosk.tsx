@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
     Calendar, UtensilsCrossed, CheckSquare, Users, Maximize2, Minimize2, X, MapPin,
-    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe, Download,
+    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe, Download, ZoomIn, ZoomOut,
     Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -31,7 +31,7 @@ const hhmm = (iso: string) => new Intl.DateTimeFormat(intlLocale(), { hour: '2-d
 // ── Per-device kiosk settings (localStorage — the right scope for a wall display) ──
 
 interface KioskLocation { name: string; lat: number; lon: number }
-interface KioskSettings { location: KioskLocation | null; photoBackground: boolean; darkMode: boolean }
+interface KioskSettings { location: KioskLocation | null; photoBackground: boolean; darkMode: boolean; zoom: number }
 
 const SETTINGS_KEY = 'openfamily.kioskSettings';
 
@@ -45,10 +45,11 @@ const loadKioskSettings = (): KioskSettings => {
                 location: loc && typeof loc.lat === 'number' && typeof loc.lon === 'number' && typeof loc.name === 'string' ? loc : null,
                 photoBackground: Boolean(parsed.photoBackground),
                 darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : true,
+                zoom: typeof parsed.zoom === 'number' && parsed.zoom >= 0.5 && parsed.zoom <= 2.0 ? parsed.zoom : 1.0,
             };
         }
     } catch { /* corrupted settings → defaults */ }
-    return { location: null, photoBackground: false, darkMode: true };
+    return { location: null, photoBackground: false, darkMode: true, zoom: 1.0 };
 };
 
 // ── Weather (Open-Meteo, no API key, public CORS — also works in the static demo) ──
@@ -520,7 +521,7 @@ const Kiosk: React.FC = () => {
                 </div>
             )}
 
-            <div className="relative z-10">
+            <div className="relative z-10" style={{ zoom: settings.zoom }}>
             {/* Top bar */}
             <header className="flex flex-wrap items-end justify-between gap-4 px-6 pt-6 lg:px-12 lg:pt-10">
                 <div>
@@ -592,9 +593,9 @@ const Kiosk: React.FC = () => {
                 </div>
             </header>
 
-            <main className="grid grid-cols-1 gap-6 px-6 pb-10 pt-6 xl:grid-cols-3 xl:gap-8 lg:px-12">
-                {/* Coluna 1: Agenda & Compromissos */}
-                <section className={cn(panelClass, 'xl:col-span-1 xl:p-7')}>
+            <main className="grid grid-cols-1 gap-5 px-6 pb-10 pt-6 lg:grid-cols-3 lg:gap-6 lg:px-12">
+                {/* Schedule — wide column */}
+                <section className={cn(panelClass, 'lg:col-span-2 lg:p-8')}>
                     <h2 className="mb-5 flex items-center gap-3 font-serif text-h1">
                         <Calendar className="h-7 w-7 text-primary" /> {t('kiosk:schedule')}
                     </h2>
@@ -603,15 +604,15 @@ const Kiosk: React.FC = () => {
                     ) : (
                         <div className="divide-y divide-border">
                             {todayAppointments.map((a) => (
-                                <div key={a.id} className="grid grid-cols-[90px_1fr] items-baseline gap-3 py-3.5">
-                                    <div className="font-serif text-[clamp(1.3rem,2.2vw,1.8rem)] tabular-nums text-muted-foreground">
+                                <div key={a.id} className="grid grid-cols-[110px_1fr] items-baseline gap-4 py-4">
+                                    <div className="font-serif text-[clamp(1.4rem,2.4vw,2rem)] tabular-nums text-muted-foreground">
                                         {hhmm(a.start_time)}
                                     </div>
                                     <div className="min-w-0">
-                                        <p className="truncate text-[clamp(1.1rem,2vw,1.6rem)] font-semibold">{a.title}</p>
-                                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
+                                        <p className="truncate text-[clamp(1.2rem,2.2vw,1.9rem)] font-semibold">{a.title}</p>
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-body text-muted-foreground">
                                             {a.location && (
-                                                <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{a.location}</span>
+                                                <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4" />{a.location}</span>
                                             )}
                                             {(a.family_members_data || []).map((m) => (
                                                 <span key={m.id} className="inline-flex items-center gap-1.5">
@@ -627,8 +628,8 @@ const Kiosk: React.FC = () => {
                     )}
                 </section>
 
-                {/* Coluna 2: Refeições & Onde estão & Tarefas */}
-                <div className="flex flex-col gap-6">
+                {/* Right column */}
+                <div className="flex flex-col gap-5 lg:gap-6">
                     {/* Meals */}
                     <section className={panelClass}>
                         <h2 className="mb-4 flex items-center gap-2.5 font-serif text-h2">
@@ -757,30 +758,28 @@ const Kiosk: React.FC = () => {
                     </section>
                 </div>
 
-                {/* Coluna 3: Notas da Família & Extras */}
-                <div className="flex flex-col gap-6">
-                    {isModuleEnabled('notes') && (visibleNotes.length > 0 || dismissedNotes.length > 0) && (
-                        <section className={panelClass}>
-                            <h2 className="mb-4 flex items-center gap-2.5 font-serif text-h2">
-                                <StickyNote className="h-6 w-6 text-primary" /> {t('notes:title')}
-                            </h2>
-                            {dismissedNotes.map((d) => (
-                                <div key={`done-${d.id}`} className="mb-3 flex items-center gap-3 rounded-input bg-success/10 px-3 py-2.5 text-success">
-                                    <Check className="h-5 w-5 shrink-0" />
-                                    <span className="min-w-0 flex-1 truncate line-through">{d.content}</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => undoNote(d.id)}
-                                        className="flex shrink-0 items-center gap-1.5 rounded-input px-2.5 py-1.5 text-caption font-medium underline-offset-2 active:underline"
-                                    >
-                                        <Undo2 className="h-4 w-4" /> {t('kiosk:undo')}
-                                    </button>
-                                </div>
-                            ))}
-                            <FamilyNotes notes={visibleNotes} variant="kiosk" onDismiss={dismissNote} />
-                        </section>
-                    )}
-                </div>
+                {/* Family notes — post-its, shown only when there's something on the fridge */}
+                {isModuleEnabled('notes') && (visibleNotes.length > 0 || dismissedNotes.length > 0) && (
+                    <section className={cn(panelClass, 'lg:col-span-3')}>
+                        <h2 className="mb-5 flex items-center gap-3 font-serif text-h1">
+                            <StickyNote className="h-7 w-7 text-primary" /> {t('notes:title')}
+                        </h2>
+                        {dismissedNotes.map((d) => (
+                            <div key={`done-${d.id}`} className="mb-3 flex items-center gap-3 rounded-input bg-success/10 px-3 py-2.5 text-success">
+                                <Check className="h-5 w-5 shrink-0" />
+                                <span className="min-w-0 flex-1 truncate line-through">{d.content}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => undoNote(d.id)}
+                                    className="flex shrink-0 items-center gap-1.5 rounded-input px-2.5 py-1.5 text-caption font-medium underline-offset-2 active:underline"
+                                >
+                                    <Undo2 className="h-4 w-4" /> {t('kiosk:undo')}
+                                </button>
+                            </div>
+                        ))}
+                        <FamilyNotes notes={visibleNotes} variant="kiosk" onDismiss={dismissNote} />
+                    </section>
+                )}
             </main>
             </div>
 
@@ -906,6 +905,37 @@ const Kiosk: React.FC = () => {
                                     settings.darkMode ? 'left-6' : 'left-1'
                                 )} />
                             </button>
+                        </div>
+
+                        {/* Zoom level control */}
+                        <div className="mt-4 flex items-center justify-between gap-4">
+                            <div>
+                                <p className="text-caption font-medium flex items-center gap-1.5">
+                                    <ZoomIn className="h-4 w-4 text-primary" /> Zoom / Tamanho da Tela
+                                </p>
+                                <p className="mt-0.5 text-micro text-muted-foreground">Ajuste a escala dos elementos para sua TV</p>
+                            </div>
+                            <div className="flex items-center gap-1.5 bg-surface-2 p-1 rounded-input border border-border">
+                                <button
+                                    type="button"
+                                    onClick={() => setSettings((s) => ({ ...s, zoom: Math.max(0.6, Math.round((s.zoom - 0.1) * 10) / 10) }))}
+                                    className="p-1.5 rounded-input hover:bg-surface border border-border text-foreground font-bold active:bg-primary/20 transition-colors"
+                                    title="Diminuir Zoom (-)"
+                                >
+                                    <ZoomOut className="h-4 w-4" />
+                                </button>
+                                <span className="text-caption font-mono font-bold px-2 w-12 text-center text-primary">
+                                    {Math.round(settings.zoom * 100)}%
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setSettings((s) => ({ ...s, zoom: Math.min(1.6, Math.round((s.zoom + 0.1) * 10) / 10) }))}
+                                    className="p-1.5 rounded-input hover:bg-surface border border-border text-foreground font-bold active:bg-primary/20 transition-colors"
+                                    title="Aumentar Zoom (+)"
+                                >
+                                    <ZoomIn className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
 
                         {/* Kiosk TV Link section */}
