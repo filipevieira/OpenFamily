@@ -25,6 +25,7 @@ import Integrations from './pages/Integrations';
 import GoogleCallback from './pages/GoogleCallback';
 
 import PairTV from './pages/PairTV';
+import Sounds from './pages/Sounds';
 
 function App() {
     const { isAuthenticated, loading, isModuleEnabled } = useAuth();
@@ -83,6 +84,7 @@ function App() {
                 <Route path="/meal-planning" element={moduleRoute('meals', <MealPlanning />)} />
                 <Route path="/budget" element={moduleRoute('budget', <Budget />)} />
                 <Route path="/family" element={<Family />} />
+                <Route path="/sounds" element={<Sounds />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/integrations/google/callback" element={<GoogleCallback />} />
                 <Route path="/integrations" element={moduleRoute('integrations', <Integrations />)} />

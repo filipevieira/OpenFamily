@@ -1,0 +1,47 @@
+{
+  "title": "Relaxing Sounds & White Noise",
+  "subtitle": "Procedural sound generator for sleep, focus, and pet anxiety relief",
+  "stopAll": "Stop All Sounds",
+  "presetsTitle": "Quick Presets",
+  "presetTap": "Tap to apply",
+  "catalogTitle": "Sound Catalog",
+  "play": "Play",
+  "stop": "Stop",
+  "masterVolume": "Master Volume",
+  "timer": "Sleep Timer",
+
+  "preset": {
+    "deep_sleep": "Deep Sleep",
+    "rainy_night": "Rainy Night",
+    "pet_calm": "Pet Calming",
+    "relax_focus": "Relax & Focus"
+  },
+
+  "sound": {
+    "rain": "Rain on Roof",
+    "thunder": "Distant Thunder",
+    "fireplace": "Cozy Fireplace",
+    "wind": "Wind in Trees",
+    "waves": "Ocean Waves",
+    "white_noise": "White Noise",
+    "pink_noise": "Pink Noise",
+    "brown_noise": "Brown Noise (Pet Calm)",
+    "purr": "Cat Purring",
+    "cafe": "Cozy Cafe",
+    "birds": "Forest Birds"
+  },
+
+  "desc": {
+    "rain": "Gentle rain sounds falling on the roof",
+    "thunder": "Soft low thunder rumbles",
+    "fireplace": "Warm crackling fireplace clicks",
+    "wind": "Soothing wind breeze in tree leaves",
+    "waves": "Rhythmic ocean tide swells",
+    "white_noise": "Uniform frequency for background noise isolation",
+    "pink_noise": "Balanced low frequencies for deep sleep",
+    "brown_noise": "Deep rumble ideal for calming dogs and pets",
+    "purr": "Soft 25Hz cat purr oscillation",
+    "cafe": "Warm background coffee shop ambiance",
+    "birds": "Gentle bird chirps in the forest"
+  }
+}

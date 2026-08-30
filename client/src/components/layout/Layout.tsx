@@ -23,6 +23,7 @@ import {
     WifiOff,
     Plug,
     PiggyBank,
+    Sparkles,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
@@ -46,6 +47,7 @@ const navigation: { labelKey: string; href: string; icon: typeof Home; module?: 
     { labelKey: 'items.recipes', href: '/recipes', icon: ChefHat, module: 'recipes' },
     { labelKey: 'items.meals', href: '/meal-planning', icon: UtensilsCrossed, module: 'meals' },
     { labelKey: 'items.budget', href: '/budget', icon: Wallet, module: 'budget' },
+    { labelKey: 'items.sounds', href: '/sounds', icon: Sparkles },
     { labelKey: 'items.family', href: '/family', icon: Users },
     { labelKey: 'items.integrations', href: '/integrations', icon: Plug, module: 'integrations' },
     { labelKey: 'items.settings', href: '/settings', icon: Settings },

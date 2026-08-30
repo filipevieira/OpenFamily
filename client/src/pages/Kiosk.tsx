@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
     Calendar, UtensilsCrossed, CheckSquare, Users, Maximize2, Minimize2, X, MapPin,
     Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe, Download, ZoomIn, ZoomOut,
-    Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning,
+    Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning, Music, Sparkles, Square,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -13,6 +13,7 @@ import { intlLocale } from '../i18n/format';
 import { changeAppLanguage } from '../lib/language';
 import { cn } from '../lib/utils';
 import FamilyNotes, { type FamilyNote } from '../components/app/FamilyNotes';
+import { soundEngine, PRESETS, type PresetDef } from '../lib/soundEngine';
 
 interface Member { id: string; name: string; color: string }
 interface Appointment { id: string; title: string; start_time: string; end_time?: string; location?: string; family_members_data?: Member[] }
@@ -31,7 +32,7 @@ const hhmm = (iso: string) => new Intl.DateTimeFormat(intlLocale(), { hour: '2-d
 // ── Per-device kiosk settings (localStorage — the right scope for a wall display) ──
 
 interface KioskLocation { name: string; lat: number; lon: number }
-interface KioskSettings { location: KioskLocation | null; photoBackground: boolean; darkMode: boolean; zoom: number }
+interface KioskSettings { location: KioskLocation | null; photoBackground: boolean; darkMode: boolean; zoom: number; brightness: number }
 
 const SETTINGS_KEY = 'openfamily.kioskSettings';
 
@@ -46,10 +47,11 @@ const loadKioskSettings = (): KioskSettings => {
                 photoBackground: Boolean(parsed.photoBackground),
                 darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : true,
                 zoom: typeof parsed.zoom === 'number' && parsed.zoom >= 0.5 && parsed.zoom <= 2.0 ? parsed.zoom : 1.0,
+                brightness: typeof parsed.brightness === 'number' && parsed.brightness >= 15 && parsed.brightness <= 100 ? parsed.brightness : 100,
             };
         }
     } catch { /* corrupted settings → defaults */ }
-    return { location: null, photoBackground: false, darkMode: true, zoom: 1.0 };
+    return { location: null, photoBackground: false, darkMode: true, zoom: 1.0, brightness: 100 };
 };
 
 // ── Weather (Open-Meteo, no API key, public CORS — also works in the static demo) ──
@@ -136,7 +138,13 @@ const Kiosk: React.FC = () => {
     // Per-device settings + weather + photo background
     const [settings, setSettings] = useState<KioskSettings>(loadKioskSettings);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [soundsOpen, setSoundsOpen] = useState(false);
+    const [soundsState, setSoundsState] = useState(() => soundEngine.getState());
     const [weather, setWeather] = useState<WeatherState | null>(null);
+
+    useEffect(() => {
+        return soundEngine.subscribe(() => setSoundsState(soundEngine.getState()));
+    }, []);
     const [photos, setPhotos] = useState<{ id: number; url: string }[]>([]);
     const photosRef = useRef(photos);
     photosRef.current = photos;
@@ -512,7 +520,10 @@ const Kiosk: React.FC = () => {
     }
 
     return (
-        <div className="relative min-h-screen bg-background text-foreground">
+        <div
+            className="relative min-h-screen bg-background text-foreground transition-all duration-300"
+            style={{ filter: settings.brightness < 100 ? `brightness(${settings.brightness}%)` : undefined }}
+        >
             {/* Immich photo background (soft, dimmed, behind everything) */}
             {photoActive && (
                 <div className="fixed inset-0 z-0" aria-hidden="true">
@@ -567,6 +578,35 @@ const Kiosk: React.FC = () => {
 
                 <div className="flex items-center gap-2">
                     <img src={`${import.meta.env.BASE_URL}OpenFamily.png`} alt="OpenFamily" className="hidden h-10 w-10 object-contain sm:block" />
+
+                    {/* Ambient Sounds Button */}
+                    <button
+                        type="button"
+                        onClick={() => setSoundsOpen(true)}
+                        aria-label="Sons Relaxantes & Ruído Branco"
+                        title="Sons Relaxantes & Ruído Branco"
+                        className={cn(topButtonClass, soundsState.anyActive && 'border-primary text-primary bg-primary/10 animate-pulse')}
+                    >
+                        <Music className="h-5 w-5" />
+                    </button>
+
+                    {/* Quick Dimmer Brightness Button */}
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const levels = [100, 75, 50, 30, 15];
+                            const idx = levels.indexOf(settings.brightness);
+                            const next = levels[(idx + 1) % levels.length];
+                            setSettings((s) => ({ ...s, brightness: next }));
+                        }}
+                        aria-label="Ajustar Brilho Noturno"
+                        title={`Brilho Noturno: ${settings.brightness}%`}
+                        className={cn(topButtonClass, settings.brightness < 100 && 'border-amber-500/50 text-amber-400 bg-amber-500/10')}
+                    >
+                        <Sun className="h-5 w-5" />
+                        {settings.brightness < 100 && <span className="text-micro font-bold ml-1">{settings.brightness}%</span>}
+                    </button>
+
                     <button
                         type="button"
                         onClick={() => setSettingsOpen(true)}
@@ -938,6 +978,33 @@ const Kiosk: React.FC = () => {
                             </div>
                         </div>
 
+                        {/* Brightness control */}
+                        <div className="mt-4 flex items-center justify-between gap-4">
+                            <div>
+                                <p className="text-caption font-medium flex items-center gap-1.5">
+                                    <Sun className="h-4 w-4 text-primary" /> Brilho Noturno (Dimmer)
+                                </p>
+                                <p className="mt-0.5 text-micro text-muted-foreground">Reduza a luminosidade da TV à noite</p>
+                            </div>
+                            <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-input border border-border">
+                                {[100, 75, 50, 30, 15].map((lvl) => (
+                                    <button
+                                        key={lvl}
+                                        type="button"
+                                        onClick={() => setSettings((s) => ({ ...s, brightness: lvl }))}
+                                        className={cn(
+                                            'px-2 py-1 rounded-input text-micro font-bold transition-colors',
+                                            settings.brightness === lvl
+                                                ? 'bg-primary text-primary-foreground shadow'
+                                                : 'text-muted-foreground hover:bg-surface'
+                                        )}
+                                    >
+                                        {lvl}%
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         {/* Kiosk TV Link section */}
                         <div className="mt-6 border-t border-border pt-5">
                             <div className="flex items-center justify-between gap-3 mb-2">
@@ -1013,6 +1080,66 @@ const Kiosk: React.FC = () => {
                                 ))}
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Ambient Sound Modal overlay in Kiosk */}
+            {soundsOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={() => setSoundsOpen(false)} />
+                    <div className="relative w-full max-w-lg rounded-card border border-border bg-card p-6 shadow-2xl">
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="h-6 w-6 text-primary" />
+                                <h2 className="font-serif text-h2">Sons Relaxantes & Ruídos</h2>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSoundsOpen(false)}
+                                aria-label="Fechar"
+                                className="rounded-input p-2 text-muted-foreground active:bg-surface-2"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <p className="mb-4 text-caption text-muted-foreground">
+                            Sons sintetizados em segundo plano para sono, relaxamento e acalmar cães e gatos.
+                        </p>
+
+                        {/* Presets Grid */}
+                        <div className="mb-5 grid grid-cols-2 gap-2.5">
+                            {PRESETS.map((preset: PresetDef) => (
+                                <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => soundEngine.applyPreset(preset)}
+                                    className="flex items-center gap-2.5 rounded-input border border-border bg-surface p-3 text-left hover:border-primary active:scale-[0.98] transition-all"
+                                >
+                                    <span className="text-xl">{preset.icon}</span>
+                                    <span className="text-caption font-semibold">{t(preset.nameKey)}</span>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Controls */}
+                        {soundsState.anyActive ? (
+                            <div className="flex items-center justify-between border-t border-border pt-4">
+                                <span className="text-caption font-bold text-primary animate-pulse">🎵 Tocando em segundo plano</span>
+                                <button
+                                    type="button"
+                                    onClick={() => soundEngine.stopAll()}
+                                    className="flex items-center gap-1.5 rounded-input bg-destructive/10 px-3 py-1.5 text-caption font-medium text-destructive active:bg-destructive/20"
+                                >
+                                    <Square className="h-4 w-4" /> Parar Sons
+                                </button>
+                            </div>
+                        ) : (
+                            <p className="text-center text-caption text-muted-foreground border-t border-border pt-4">
+                                Toque em um preset para iniciar o som na TV
+                            </p>
+                        )}
                     </div>
                 </div>
             )}

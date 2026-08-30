@@ -1,0 +1,47 @@
+{
+  "title": "Sons Relaxantes & Ruído Branco",
+  "subtitle": "Gerador de sons sintetizados para sono, concentração e tranquilidade para cães e gatos",
+  "stopAll": "Parar Todos os Sons",
+  "presetsTitle": "Presets Rápidos",
+  "presetTap": "Toque para aplicar",
+  "catalogTitle": "Catálogo de Sons",
+  "play": "Tocar",
+  "stop": "Parar",
+  "masterVolume": "Volume Mestre",
+  "timer": "Timer de Sono",
+
+  "preset": {
+    "deep_sleep": "Dormir Profundo",
+    "rainy_night": "Noite Chuvosa",
+    "pet_calm": "Calmante para Pets",
+    "relax_focus": "Foco & Relaxamento"
+  },
+
+  "sound": {
+    "rain": "Chuva no Telhado",
+    "thunder": "Trovão Distante",
+    "fireplace": "Fogueira / Lareira",
+    "wind": "Vento nas Árvores",
+    "waves": "Ondas do Mar",
+    "white_noise": "Ruído Branco",
+    "pink_noise": "Ruído Rosa",
+    "brown_noise": "Ruído Marrom (Pet Calm)",
+    "purr": "Ronronar de Gato",
+    "cafe": "Cafeteria Aconchegante",
+    "birds": "Pássaros na Floresta"
+  },
+
+  "desc": {
+    "rain": "Som contínuo de chuva suave caindo no telhado",
+    "thunder": "Murmúrio grave e distante de tempestade",
+    "fireplace": "Estalos suaves de madeira queimando na lareira",
+    "wind": "Brisa de vento modulada nas copas das árvores",
+    "waves": "Ritmo relaxante de maré subindo e descendo",
+    "white_noise": "Frequência uniforme para isolamento de barulhos",
+    "pink_noise": "Frequência equilibrada para induzir o sono profundo",
+    "brown_noise": "Grave profundo excelente para acalmar cães e ansiedade",
+    "purr": "Oscilação em 25Hz simulando o ronronar felino",
+    "cafe": "Textura suave de ambiente aconchegante",
+    "birds": "Cantos aleatórios e suaves na natureza"
+  }
+}
