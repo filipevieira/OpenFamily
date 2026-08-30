@@ -60,13 +60,14 @@ function App() {
         return <ResetPassword onDone={() => navigate('/', { replace: true })} />;
     }
 
-    if (!isAuthenticated) {
-        return <Login />;
-    }
-
     // Kiosk is a full-screen, chrome-less display — render it outside the Layout.
+    // Must be evaluated BEFORE !isAuthenticated so unauthenticated TVs show the Netflix QR pairing screen!
     if (location.pathname === '/kiosk') {
         return isModuleEnabled('kiosk') ? <Kiosk /> : <Navigate to="/" replace />;
+    }
+
+    if (!isAuthenticated) {
+        return <Login />;
     }
 
     return (
