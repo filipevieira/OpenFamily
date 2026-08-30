@@ -82,6 +82,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
 
         const bootstrapSession = async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryToken = urlParams.get('token');
+            if (queryToken) {
+                api.setToken(queryToken);
+            }
             const token = api.getToken();
             // In the static demo there is no real auth: load the seeded user directly.
             if (!token && !IS_DEMO) {

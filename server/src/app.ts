@@ -23,6 +23,7 @@ import rewardsRoutes from './routes/rewards';
 import notesRoutes from './routes/notes';
 import aiRoutes from './routes/ai';
 import categoriesRoutes from './routes/categories';
+import kioskTokenRoutes from './routes/kioskToken';
 import kakeiboRoutes from './routes/kakeibo';
 import { loadEnv } from './config/loadEnv';
 import logger from './lib/logger';
@@ -185,6 +186,7 @@ app.use('/api/notes', notesRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/kakeibo', kakeiboRoutes);
+app.use('/api/kiosk', kioskTokenRoutes);
 
 // Static client (native Windows install): serve the built SPA from the same origin
 // as the API, so the app is reachable from any device on the LAN via http://<ip>:3000.

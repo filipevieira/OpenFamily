@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
     Calendar, UtensilsCrossed, CheckSquare, Users, Maximize2, Minimize2, X, MapPin,
-    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote,
+    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv,
     Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -142,6 +142,18 @@ const Kiosk: React.FC = () => {
     const [citySearch, setCitySearch] = useState('');
     const [cityResults, setCityResults] = useState<GeoResult[]>([]);
     const [searchingCity, setSearchingCity] = useState(false);
+
+    const [kioskToken, setKioskToken] = useState<string | null>(null);
+    const [copiedToken, setCopiedToken] = useState(false);
+
+    const loadKioskToken = async () => {
+        try {
+            const res = await api.get<{ success: boolean; token: string }>('/api/kiosk/token');
+            if (res.success && res.token) {
+                setKioskToken(res.token);
+            }
+        } catch { /* token load error */ }
+    };
 
     // Tap-to-complete confirmations ("✓ done — undo", visible ~5s)
     const [doneTasks, setDoneTasks] = useState<{ id: string; title: string }[]>([]);
@@ -723,6 +735,45 @@ const Kiosk: React.FC = () => {
                                     settings.photoBackground ? 'left-6' : 'left-1'
                                 )} />
                             </button>
+                        </div>
+
+                        {/* Kiosk TV Link section */}
+                        <div className="mt-6 border-t border-border pt-5">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <p className="text-caption font-medium flex items-center gap-1.5">
+                                    <Tv className="h-4 w-4 text-primary" /> Link para TV / Android TV
+                                </p>
+                                {!kioskToken && (
+                                    <button
+                                        type="button"
+                                        onClick={loadKioskToken}
+                                        className="text-micro font-medium text-primary underline"
+                                    >
+                                        Gerar Link sem Senha
+                                    </button>
+                                )}
+                            </div>
+                            {kioskToken && (
+                                <div className="space-y-2">
+                                    <input
+                                        readOnly
+                                        value={`${window.location.origin}/kiosk?token=${kioskToken}`}
+                                        className="w-full rounded-input border border-border bg-surface-2 p-2 text-micro font-mono outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            void navigator.clipboard.writeText(`${window.location.origin}/kiosk?token=${kioskToken}`);
+                                            setCopiedToken(true);
+                                            setTimeout(() => setCopiedToken(false), 2000);
+                                        }}
+                                        className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-input border border-primary/30 bg-primary/10 text-primary text-micro font-medium hover:bg-primary/20 transition-colors"
+                                    >
+                                        {copiedToken ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                        {copiedToken ? 'Copiado!' : 'Copiar URL para TV'}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
