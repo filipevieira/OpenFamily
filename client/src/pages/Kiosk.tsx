@@ -5,6 +5,7 @@ import {
     Calendar, UtensilsCrossed, CheckSquare, Users, Maximize2, Minimize2, X, MapPin,
     Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe, Download, ZoomIn, ZoomOut,
     Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning, Music, Sparkles, Square,
+    SkipForward,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -651,6 +652,50 @@ const Kiosk: React.FC = () => {
                 </div>
             </header>
 
+            {/* TV Main Screen Ambient Sound Player Widget */}
+            {soundsState.anyActive && (
+                <div className="mx-6 mt-4 lg:mx-12">
+                    <div className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-primary/40 bg-card/90 p-4 shadow-xl backdrop-blur-md">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary animate-pulse">
+                                <Music className="h-6 w-6 text-primary" />
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-serif text-lg font-bold text-foreground">
+                                        {soundsState.activePreset ? t(soundsState.activePreset.nameKey) : 'Sons Relaxantes Ativos'}
+                                    </span>
+                                    <span className="rounded-full bg-primary/20 px-2.5 py-0.5 font-mono text-micro font-bold text-primary">
+                                        {soundsState.activeCount} som(ns)
+                                    </span>
+                                </div>
+                                <p className="text-caption text-muted-foreground">Tocando no ambiente em segundo plano</p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {/* Next Preset */}
+                            <button
+                                type="button"
+                                onClick={() => soundEngine.nextPreset()}
+                                className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-2 text-caption font-semibold text-foreground hover:bg-surface-3 transition-colors active:scale-95"
+                            >
+                                <SkipForward className="h-4 w-4 text-primary" /> Trocar Preset
+                            </button>
+
+                            {/* Stop */}
+                            <button
+                                type="button"
+                                onClick={() => soundEngine.stopAll()}
+                                className="flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-2 text-caption font-semibold text-destructive hover:bg-destructive/20 transition-colors active:scale-95"
+                            >
+                                <Square className="h-4 w-4" /> Parar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <main className="grid grid-cols-1 gap-5 px-6 pb-10 pt-6 lg:grid-cols-3 lg:gap-6 lg:px-12">
                 {/* Schedule — wide column */}
                 <section className={cn(panelClass, 'lg:col-span-2 lg:p-8')}>
@@ -844,259 +889,274 @@ const Kiosk: React.FC = () => {
             {/* Settings overlay (per-device) */}
             {settingsOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSettingsOpen(false)} />
-                    <div className="relative w-full max-w-md rounded-card border border-border bg-card p-6 shadow-lg">
-                        <div className="mb-5 flex items-center justify-between gap-3">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSettingsOpen(false)} />
+                    <div className="relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-card border border-border bg-card shadow-2xl">
+                        {/* Sticky Header with Close button (always visible on TV) */}
+                        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border bg-card p-4">
                             <h2 className="font-serif text-h2">{t('kiosk:displaySettings.title')}</h2>
                             <button
                                 type="button"
                                 onClick={() => setSettingsOpen(false)}
                                 aria-label={t('kiosk:displaySettings.close')}
-                                className="rounded-input p-2 text-muted-foreground active:bg-surface-2"
+                                className="rounded-input border border-border bg-surface-2 p-2 text-foreground transition-colors hover:bg-surface-3"
                             >
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
 
-                        {/* Weather location */}
-                        <div className="space-y-2">
-                            <p className="text-caption font-medium">{t('kiosk:displaySettings.location')}</p>
-                            {settings.location ? (
-                                <div className="flex items-center justify-between gap-3 rounded-input border border-border bg-surface-2 px-3 py-2.5">
-                                    <span className="inline-flex min-w-0 items-center gap-2">
-                                        <MapPin className="h-4 w-4 shrink-0 text-primary" />
-                                        <span className="truncate font-medium">{settings.location.name}</span>
+                        {/* Scrollable Body */}
+                        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                            {/* Weather location */}
+                            <div className="space-y-2">
+                                <p className="text-caption font-medium">{t('kiosk:displaySettings.location')}</p>
+                                {settings.location ? (
+                                    <div className="flex items-center justify-between gap-3 rounded-input border border-border bg-surface-2 px-3 py-2.5">
+                                        <span className="inline-flex min-w-0 items-center gap-2">
+                                            <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                                            <span className="truncate font-medium">{settings.location.name}</span>
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSettings((s) => ({ ...s, location: null }))}
+                                            className="shrink-0 rounded-input px-2 py-1 text-caption text-muted-foreground underline-offset-2 active:underline"
+                                        >
+                                            {t('kiosk:displaySettings.change')}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                            <input
+                                                value={citySearch}
+                                                onChange={(e) => setCitySearch(e.target.value)}
+                                                placeholder={t('kiosk:displaySettings.searchPlaceholder')}
+                                                className="w-full rounded-input border border-border bg-surface-2 py-2 pl-9 pr-3 text-caption outline-none focus:border-primary"
+                                            />
+                                        </div>
+                                        {citySearch.trim().length >= 2 && !searchingCity && (
+                                            cityResults.length === 0 ? (
+                                                <p className="px-1 text-caption text-muted-foreground">{t('kiosk:displaySettings.noResults')}</p>
+                                            ) : (
+                                                <div className="divide-y divide-border overflow-hidden rounded-input border border-border">
+                                                    {cityResults.map((r) => (
+                                                        <button
+                                                            key={r.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSettings((s) => ({ ...s, location: { name: r.name, lat: r.latitude, lon: r.longitude } }));
+                                                                setCitySearch('');
+                                                                setCityResults([]);
+                                                            }}
+                                                            className="flex w-full items-baseline gap-2 px-3 py-2.5 text-left active:bg-surface-2"
+                                                        >
+                                                            <span className="font-medium">{r.name}</span>
+                                                            <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
+                                                                {[r.admin1, r.country].filter(Boolean).join(', ')}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )
+                                        )}
+                                        <p className="text-caption text-muted-foreground">{t('kiosk:displaySettings.noLocation')}</p>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Photo background toggle */}
+                            <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
+                                <div>
+                                    <p className="text-caption font-medium">{t('kiosk:displaySettings.photoBackground')}</p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">{t('kiosk:displaySettings.photoBackgroundHint')}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={settings.photoBackground}
+                                    aria-label={t('kiosk:displaySettings.photoBackground')}
+                                    onClick={() => setSettings((s) => ({ ...s, photoBackground: !s.photoBackground }))}
+                                    className={cn(
+                                        'relative h-7 w-12 shrink-0 rounded-full transition-colors',
+                                        settings.photoBackground ? 'bg-primary' : 'border border-border bg-surface-2'
+                                    )}
+                                >
+                                    <span className={cn(
+                                        'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all',
+                                        settings.photoBackground ? 'left-6' : 'left-1'
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Dark Mode toggle */}
+                            <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
+                                <div>
+                                    <p className="text-caption font-medium flex items-center gap-1.5">
+                                        <Moon className="h-4 w-4 text-primary" /> Modo Escuro (Dark Mode)
+                                    </p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">Recomendado para telas de TV e visibilidade noturna</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={settings.darkMode}
+                                    onClick={() => setSettings((s) => ({ ...s, darkMode: !s.darkMode }))}
+                                    className={cn(
+                                        'relative h-7 w-12 shrink-0 rounded-full transition-colors',
+                                        settings.darkMode ? 'bg-primary' : 'border border-border bg-surface-2'
+                                    )}
+                                >
+                                    <span className={cn(
+                                        'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all',
+                                        settings.darkMode ? 'left-6' : 'left-1'
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Zoom level control */}
+                            <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
+                                <div>
+                                    <p className="text-caption font-medium flex items-center gap-1.5">
+                                        <ZoomIn className="h-4 w-4 text-primary" /> Zoom / Tamanho da Tela
+                                    </p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">Ajuste a escala dos elementos para sua TV</p>
+                                </div>
+                                <div className="flex items-center gap-1.5 bg-surface-2 p-1 rounded-input border border-border">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSettings((s) => ({ ...s, zoom: Math.max(0.6, Math.round((s.zoom - 0.1) * 10) / 10) }))}
+                                        className="p-1.5 rounded-input hover:bg-surface border border-border text-foreground font-bold active:bg-primary/20 transition-colors"
+                                        title="Diminuir Zoom (-)"
+                                    >
+                                        <ZoomOut className="h-4 w-4" />
+                                    </button>
+                                    <span className="text-caption font-mono font-bold px-2 w-12 text-center text-primary">
+                                        {Math.round(settings.zoom * 100)}%
                                     </span>
                                     <button
                                         type="button"
-                                        onClick={() => setSettings((s) => ({ ...s, location: null }))}
-                                        className="shrink-0 rounded-input px-2 py-1 text-caption text-muted-foreground underline-offset-2 active:underline"
+                                        onClick={() => setSettings((s) => ({ ...s, zoom: Math.min(1.6, Math.round((s.zoom + 0.1) * 10) / 10) }))}
+                                        className="p-1.5 rounded-input hover:bg-surface border border-border text-foreground font-bold active:bg-primary/20 transition-colors"
+                                        title="Aumentar Zoom (+)"
                                     >
-                                        {t('kiosk:displaySettings.change')}
+                                        <ZoomIn className="h-4 w-4" />
                                     </button>
                                 </div>
-                            ) : (
-                                <>
-                                    <div className="relative">
-                                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                        <input
-                                            value={citySearch}
-                                            onChange={(e) => setCitySearch(e.target.value)}
-                                            placeholder={t('kiosk:displaySettings.searchPlaceholder')}
-                                            className="w-full rounded-input border border-border bg-background py-2.5 pl-9 pr-3 text-body outline-none focus:border-border-strong"
-                                        />
-                                    </div>
-                                    {citySearch.trim().length >= 2 && !searchingCity && (
-                                        cityResults.length === 0 ? (
-                                            <p className="px-1 text-caption text-muted-foreground">{t('kiosk:displaySettings.noResults')}</p>
-                                        ) : (
-                                            <div className="divide-y divide-border overflow-hidden rounded-input border border-border">
-                                                {cityResults.map((r) => (
-                                                    <button
-                                                        key={r.id}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setSettings((s) => ({ ...s, location: { name: r.name, lat: r.latitude, lon: r.longitude } }));
-                                                            setCitySearch('');
-                                                            setCityResults([]);
-                                                        }}
-                                                        className="flex w-full items-baseline gap-2 px-3 py-2.5 text-left active:bg-surface-2"
-                                                    >
-                                                        <span className="font-medium">{r.name}</span>
-                                                        <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
-                                                            {[r.admin1, r.country].filter(Boolean).join(', ')}
-                                                        </span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )
+                            </div>
+
+                            {/* Brightness control */}
+                            <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
+                                <div>
+                                    <p className="text-caption font-medium flex items-center gap-1.5">
+                                        <Sun className="h-4 w-4 text-primary" /> Brilho Noturno (Dimmer)
+                                    </p>
+                                    <p className="mt-0.5 text-micro text-muted-foreground">Reduza a luminosidade da TV à noite</p>
+                                </div>
+                                <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-input border border-border">
+                                    {[100, 75, 50, 30, 15].map((lvl) => (
+                                        <button
+                                            key={lvl}
+                                            type="button"
+                                            onClick={() => setSettings((s) => ({ ...s, brightness: lvl }))}
+                                            className={cn(
+                                                'px-2 py-1 rounded-input text-micro font-bold transition-colors',
+                                                settings.brightness === lvl
+                                                    ? 'bg-primary text-primary-foreground shadow'
+                                                    : 'text-muted-foreground hover:bg-surface'
+                                            )}
+                                        >
+                                            {lvl}%
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Kiosk TV Link section */}
+                            <div className="border-t border-border pt-4">
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                    <p className="text-caption font-medium flex items-center gap-1.5">
+                                        <Tv className="h-4 w-4 text-primary" /> Link Kiosk da TV
+                                    </p>
+                                    {!kioskToken && (
+                                        <button
+                                            type="button"
+                                            onClick={loadKioskToken}
+                                            className="text-micro font-medium text-primary underline-offset-2 hover:underline"
+                                        >
+                                            Gerar Token Perm.
+                                        </button>
                                     )}
-                                    <p className="text-caption text-muted-foreground">{t('kiosk:displaySettings.noLocation')}</p>
-                                </>
-                            )}
-                        </div>
-
-                        {/* Photo background toggle */}
-                        <div className="mt-6 flex items-start justify-between gap-4">
-                            <div>
-                                <p className="text-caption font-medium">{t('kiosk:displaySettings.photoBackground')}</p>
-                                <p className="mt-0.5 text-micro text-muted-foreground">{t('kiosk:displaySettings.photoBackgroundHint')}</p>
-                            </div>
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={settings.photoBackground}
-                                aria-label={t('kiosk:displaySettings.photoBackground')}
-                                onClick={() => setSettings((s) => ({ ...s, photoBackground: !s.photoBackground }))}
-                                className={cn(
-                                    'relative h-7 w-12 shrink-0 rounded-full transition-colors',
-                                    settings.photoBackground ? 'bg-primary' : 'border border-border bg-surface-2'
-                                )}
-                            >
-                                <span className={cn(
-                                    'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all',
-                                    settings.photoBackground ? 'left-6' : 'left-1'
-                                )} />
-                            </button>
-                        </div>
-
-                        {/* Dark Mode toggle */}
-                        <div className="mt-4 flex items-start justify-between gap-4">
-                            <div>
-                                <p className="text-caption font-medium flex items-center gap-1.5">
-                                    <Moon className="h-4 w-4 text-primary" /> Modo Escuro (Dark Mode)
-                                </p>
-                                <p className="mt-0.5 text-micro text-muted-foreground">Recomendado para telas de TV e visibilidade noturna</p>
-                            </div>
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={settings.darkMode}
-                                onClick={() => setSettings((s) => ({ ...s, darkMode: !s.darkMode }))}
-                                className={cn(
-                                    'relative h-7 w-12 shrink-0 rounded-full transition-colors',
-                                    settings.darkMode ? 'bg-primary' : 'border border-border bg-surface-2'
-                                )}
-                            >
-                                <span className={cn(
-                                    'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all',
-                                    settings.darkMode ? 'left-6' : 'left-1'
-                                )} />
-                            </button>
-                        </div>
-
-                        {/* Zoom level control */}
-                        <div className="mt-4 flex items-center justify-between gap-4">
-                            <div>
-                                <p className="text-caption font-medium flex items-center gap-1.5">
-                                    <ZoomIn className="h-4 w-4 text-primary" /> Zoom / Tamanho da Tela
-                                </p>
-                                <p className="mt-0.5 text-micro text-muted-foreground">Ajuste a escala dos elementos para sua TV</p>
-                            </div>
-                            <div className="flex items-center gap-1.5 bg-surface-2 p-1 rounded-input border border-border">
-                                <button
-                                    type="button"
-                                    onClick={() => setSettings((s) => ({ ...s, zoom: Math.max(0.6, Math.round((s.zoom - 0.1) * 10) / 10) }))}
-                                    className="p-1.5 rounded-input hover:bg-surface border border-border text-foreground font-bold active:bg-primary/20 transition-colors"
-                                    title="Diminuir Zoom (-)"
-                                >
-                                    <ZoomOut className="h-4 w-4" />
-                                </button>
-                                <span className="text-caption font-mono font-bold px-2 w-12 text-center text-primary">
-                                    {Math.round(settings.zoom * 100)}%
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setSettings((s) => ({ ...s, zoom: Math.min(1.6, Math.round((s.zoom + 0.1) * 10) / 10) }))}
-                                    className="p-1.5 rounded-input hover:bg-surface border border-border text-foreground font-bold active:bg-primary/20 transition-colors"
-                                    title="Aumentar Zoom (+)"
-                                >
-                                    <ZoomIn className="h-4 w-4" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Brightness control */}
-                        <div className="mt-4 flex items-center justify-between gap-4">
-                            <div>
-                                <p className="text-caption font-medium flex items-center gap-1.5">
-                                    <Sun className="h-4 w-4 text-primary" /> Brilho Noturno (Dimmer)
-                                </p>
-                                <p className="mt-0.5 text-micro text-muted-foreground">Reduza a luminosidade da TV à noite</p>
-                            </div>
-                            <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-input border border-border">
-                                {[100, 75, 50, 30, 15].map((lvl) => (
-                                    <button
-                                        key={lvl}
-                                        type="button"
-                                        onClick={() => setSettings((s) => ({ ...s, brightness: lvl }))}
-                                        className={cn(
-                                            'px-2 py-1 rounded-input text-micro font-bold transition-colors',
-                                            settings.brightness === lvl
-                                                ? 'bg-primary text-primary-foreground shadow'
-                                                : 'text-muted-foreground hover:bg-surface'
-                                        )}
-                                    >
-                                        {lvl}%
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Kiosk TV Link section */}
-                        <div className="mt-6 border-t border-border pt-5">
-                            <div className="flex items-center justify-between gap-3 mb-2">
-                                <p className="text-caption font-medium flex items-center gap-1.5">
-                                    <Tv className="h-4 w-4 text-primary" /> Link para TV / Android TV
-                                </p>
-                                {!kioskToken && (
-                                    <button
-                                        type="button"
-                                        onClick={loadKioskToken}
-                                        className="text-micro font-medium text-primary underline"
-                                    >
-                                        Gerar Link sem Senha
-                                    </button>
-                                )}
-                            </div>
-                            {kioskToken && (
-                                <div className="space-y-2">
-                                    <input
-                                        readOnly
-                                        value={`${window.location.origin}/kiosk?token=${kioskToken}`}
-                                        className="w-full rounded-input border border-border bg-surface-2 p-2 text-micro font-mono outline-none"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            void navigator.clipboard.writeText(`${window.location.origin}/kiosk?token=${kioskToken}`);
-                                            setCopiedToken(true);
-                                            setTimeout(() => setCopiedToken(false), 2000);
-                                        }}
-                                        className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-input border border-primary/30 bg-primary/10 text-primary text-micro font-medium hover:bg-primary/20 transition-colors"
-                                    >
-                                        {copiedToken ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                                        {copiedToken ? 'Copiado!' : 'Copiar URL para TV'}
-                                    </button>
                                 </div>
-                            )}
-                            <a
-                                href="/OpenFamily-TV.apk"
-                                download
-                                className="flex items-center justify-center gap-2 w-full mt-3 py-2 rounded-input border border-primary/40 bg-primary/10 text-primary font-semibold text-caption hover:bg-primary/20 transition-colors"
-                            >
-                                <Download className="h-4 w-4" /> Baixar App Android TV (APK)
-                            </a>
+                                {kioskToken && (
+                                    <div className="space-y-2">
+                                        <input
+                                            readOnly
+                                            value={`${window.location.origin}/kiosk?token=${kioskToken}`}
+                                            className="w-full rounded-input border border-border bg-surface-2 p-2 text-micro font-mono outline-none"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void navigator.clipboard.writeText(`${window.location.origin}/kiosk?token=${kioskToken}`);
+                                                setCopiedToken(true);
+                                                setTimeout(() => setCopiedToken(false), 2000);
+                                            }}
+                                            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-input border border-primary/30 bg-primary/10 text-primary text-micro font-medium hover:bg-primary/20 transition-colors"
+                                        >
+                                            {copiedToken ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                            {copiedToken ? 'Copiado!' : 'Copiar URL para TV'}
+                                        </button>
+                                    </div>
+                                )}
+                                <a
+                                    href="/OpenFamily-TV.apk"
+                                    download
+                                    className="flex items-center justify-center gap-2 w-full mt-3 py-2 rounded-input border border-primary/40 bg-primary/10 text-primary font-semibold text-caption hover:bg-primary/20 transition-colors"
+                                >
+                                    <Download className="h-4 w-4" /> Baixar App Android TV (APK)
+                                </a>
+                            </div>
+
+                            {/* Language Selector */}
+                            <div className="border-t border-border pt-4 space-y-2">
+                                <p className="text-caption font-medium flex items-center gap-1.5">
+                                    <Globe className="h-4 w-4 text-primary" /> Idioma / Language
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { code: 'pt', label: 'Português' },
+                                        { code: 'en', label: 'English' },
+                                        { code: 'fr', label: 'Français' },
+                                        { code: 'zh', label: '中文' },
+                                    ].map((lang) => (
+                                        <button
+                                            key={lang.code}
+                                            type="button"
+                                            onClick={() => void changeAppLanguage(lang.code)}
+                                            className={cn(
+                                                'py-2 px-3 rounded-input text-caption font-medium border text-left flex items-center justify-between transition-colors',
+                                                i18n.language?.startsWith(lang.code)
+                                                    ? 'border-primary bg-primary/10 text-primary'
+                                                    : 'border-border bg-surface-2 hover:bg-surface-2/80'
+                                            )}
+                                        >
+                                            <span>{lang.label}</span>
+                                            {i18n.language?.startsWith(lang.code) && <Check className="h-3.5 w-3.5 text-primary" />}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
 
-                        {/* Language Selector */}
-                        <div className="mt-5 border-t border-border pt-4 space-y-2">
-                            <p className="text-caption font-medium flex items-center gap-1.5">
-                                <Globe className="h-4 w-4 text-primary" /> Idioma / Language
-                            </p>
-                            <div className="grid grid-cols-2 gap-2">
-                                {[
-                                    { code: 'pt', label: 'Português' },
-                                    { code: 'en', label: 'English' },
-                                    { code: 'fr', label: 'Français' },
-                                    { code: 'zh', label: '中文' },
-                                ].map((lang) => (
-                                    <button
-                                        key={lang.code}
-                                        type="button"
-                                        onClick={() => void changeAppLanguage(lang.code)}
-                                        className={cn(
-                                            'py-2 px-3 rounded-input text-caption font-medium border text-left flex items-center justify-between transition-colors',
-                                            i18n.language?.startsWith(lang.code)
-                                                ? 'border-primary bg-primary/10 text-primary'
-                                                : 'border-border bg-surface-2 hover:bg-surface-2/80'
-                                        )}
-                                    >
-                                        <span>{lang.label}</span>
-                                        {i18n.language?.startsWith(lang.code) && <Check className="h-3.5 w-3.5 text-primary" />}
-                                    </button>
-                                ))}
-                            </div>
+                        {/* Sticky Footer with big close button for TV */}
+                        <div className="sticky bottom-0 z-20 flex shrink-0 items-center justify-end border-t border-border bg-card p-3">
+                            <button
+                                type="button"
+                                onClick={() => setSettingsOpen(false)}
+                                className="flex items-center gap-2 rounded-input bg-primary px-5 py-2.5 text-caption font-bold text-primary-foreground shadow transition-colors active:scale-95"
+                            >
+                                <X className="h-4 w-4" /> Fechar Configurações
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -1,4 +1,4 @@
-// ── Procedural Web Audio API Ambient Sound Generator (100% Offline, Zero MP3 Downloads) ──
+// ── Procedural Web Audio API Ambient Sound & Live Stream Engine (100% Offline + Online Streams) ──
 
 export type SoundId =
     | 'rain'
@@ -11,17 +11,24 @@ export type SoundId =
     | 'brown_noise'
     | 'purr'
     | 'cafe'
-    | 'birds';
+    | 'birds'
+    | 'lofi_radio'
+    | 'relax_piano'
+    | 'pet_music';
 
 export interface SoundDef {
     id: SoundId;
     nameKey: string;
     icon: string;
     descriptionKey: string;
-    category: 'nature' | 'noise' | 'pets' | 'ambiance';
+    category: 'nature' | 'noise' | 'pets' | 'ambiance' | 'radio';
+    streamUrl?: string;
 }
 
 export const SOUND_DEFINITIONS: SoundDef[] = [
+    { id: 'lofi_radio', nameKey: 'sounds:sound.lofi_radio', icon: '🎧', descriptionKey: 'sounds:desc.lofi_radio', category: 'radio', streamUrl: 'https://stream.zeno.fm/f3wvbbqmdg8uv' },
+    { id: 'pet_music', nameKey: 'sounds:sound.pet_music', icon: '🐶', descriptionKey: 'sounds:desc.pet_music', category: 'pets', streamUrl: 'https://stream.zeno.fm/08w2r60vfa8uv' },
+    { id: 'relax_piano', nameKey: 'sounds:sound.relax_piano', icon: '🎹', descriptionKey: 'sounds:desc.relax_piano', category: 'ambiance', streamUrl: 'https://stream.zeno.fm/m83y1g4q9h8uv' },
     { id: 'rain', nameKey: 'sounds:sound.rain', icon: '🌧️', descriptionKey: 'sounds:desc.rain', category: 'nature' },
     { id: 'thunder', nameKey: 'sounds:sound.thunder', icon: '⚡', descriptionKey: 'sounds:desc.thunder', category: 'nature' },
     { id: 'fireplace', nameKey: 'sounds:sound.fireplace', icon: '🔥', descriptionKey: 'sounds:desc.fireplace', category: 'nature' },
@@ -44,6 +51,18 @@ export interface PresetDef {
 
 export const PRESETS: PresetDef[] = [
     {
+        id: 'lofi_chill',
+        nameKey: 'sounds:preset.lofi_chill',
+        icon: '🎧',
+        sounds: { lofi_radio: 0.8, rain: 0.2 },
+    },
+    {
+        id: 'pet_calm',
+        nameKey: 'sounds:preset.pet_calm',
+        icon: '🐶🐱',
+        sounds: { brown_noise: 0.7, pet_music: 0.5, purr: 0.4 },
+    },
+    {
         id: 'deep_sleep',
         nameKey: 'sounds:preset.deep_sleep',
         icon: '💤',
@@ -56,32 +75,29 @@ export const PRESETS: PresetDef[] = [
         sounds: { rain: 0.6, fireplace: 0.4, wind: 0.2 },
     },
     {
-        id: 'pet_calm',
-        nameKey: 'sounds:preset.pet_calm',
-        icon: '🐶🐱',
-        sounds: { brown_noise: 0.7, purr: 0.4, rain: 0.2 },
-    },
-    {
-        id: 'relax_focus',
-        nameKey: 'sounds:preset.relax_focus',
-        icon: '🧘',
-        sounds: { birds: 0.4, rain: 0.3, wind: 0.2 },
+        id: 'relax_piano_preset',
+        nameKey: 'sounds:preset.relax_piano',
+        icon: '🎹',
+        sounds: { relax_piano: 0.8, birds: 0.2 },
     },
 ];
 
 class SoundChannel {
     public id: SoundId;
-    public volume: number = 0.5; // 0 to 1
+    public volume: number = 0.5;
     public active: boolean = false;
+    public streamUrl?: string;
 
     private ctx: AudioContext;
     private gainNode: GainNode;
     private sourceNodes: AudioNode[] = [];
     private intervalId?: number;
+    private audioElement?: HTMLAudioElement;
 
-    constructor(ctx: AudioContext, masterGain: GainNode, id: SoundId) {
+    constructor(ctx: AudioContext, masterGain: GainNode, def: SoundDef) {
         this.ctx = ctx;
-        this.id = id;
+        this.id = def.id;
+        this.streamUrl = def.streamUrl;
         this.gainNode = ctx.createGain();
         this.gainNode.gain.setValueAtTime(0, ctx.currentTime);
         this.gainNode.connect(masterGain);
@@ -91,6 +107,9 @@ class SoundChannel {
         this.volume = Math.max(0, Math.min(1, vol));
         if (this.active) {
             this.gainNode.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
+            if (this.audioElement) {
+                this.audioElement.volume = this.volume;
+            }
         }
     }
 
@@ -122,6 +141,11 @@ class SoundChannel {
         if (this.intervalId) {
             clearInterval(this.intervalId);
             this.intervalId = undefined;
+        }
+        if (this.audioElement) {
+            this.audioElement.pause();
+            this.audioElement.src = '';
+            this.audioElement = undefined;
         }
         this.sourceNodes.forEach((n) => {
             try {
@@ -171,8 +195,18 @@ class SoundChannel {
 
     private buildNodes() {
         this.cleanup();
-
         const ctx = this.ctx;
+
+        if (this.streamUrl) {
+            // Live Stream Player
+            try {
+                this.audioElement = new Audio(this.streamUrl);
+                this.audioElement.crossOrigin = 'anonymous';
+                this.audioElement.volume = this.volume;
+                void this.audioElement.play();
+            } catch { /* stream load error */ }
+            return;
+        }
 
         switch (this.id) {
             case 'white_noise': {
@@ -233,7 +267,6 @@ class SoundChannel {
                 filter.frequency.setValueAtTime(400, ctx.currentTime);
                 filter.Q.setValueAtTime(3.0, ctx.currentTime);
 
-                // LFO for wind gusting
                 const lfo = ctx.createOscillator();
                 lfo.frequency.setValueAtTime(0.15, ctx.currentTime);
 
@@ -260,9 +293,8 @@ class SoundChannel {
                 filter.type = 'lowpass';
                 filter.frequency.setValueAtTime(500, ctx.currentTime);
 
-                // Swell gain LFO
                 const swellLfo = ctx.createOscillator();
-                swellLfo.frequency.setValueAtTime(0.08, ctx.currentTime); // ~12s per wave
+                swellLfo.frequency.setValueAtTime(0.08, ctx.currentTime);
 
                 const swellGain = ctx.createGain();
                 swellGain.gain.setValueAtTime(0.4, ctx.currentTime);
@@ -278,7 +310,6 @@ class SoundChannel {
                 break;
             }
             case 'fireplace': {
-                // Background warm hum
                 const src = ctx.createBufferSource();
                 src.buffer = this.buildNoiseBuffer('brown');
                 src.loop = true;
@@ -292,7 +323,6 @@ class SoundChannel {
                 src.start();
                 this.sourceNodes.push(src, lowpass);
 
-                // Random wood crackle clicks
                 this.intervalId = window.setInterval(() => {
                     if (!this.active) return;
                     if (Math.random() < 0.6) {
@@ -313,7 +343,6 @@ class SoundChannel {
                 break;
             }
             case 'purr': {
-                // Cat purr oscillator (25Hz sine modulated with 0.8Hz rhythm + warm pink noise)
                 const osc = ctx.createOscillator();
                 osc.type = 'sine';
                 osc.frequency.setValueAtTime(25, ctx.currentTime);
@@ -347,7 +376,6 @@ class SoundChannel {
                 break;
             }
             case 'thunder': {
-                // Gentle distant thunder rumble generator
                 const noise = ctx.createBufferSource();
                 noise.buffer = this.buildNoiseBuffer('brown');
                 noise.loop = true;
@@ -361,7 +389,6 @@ class SoundChannel {
                 noise.start();
                 this.sourceNodes.push(noise, filter);
 
-                // Periodic thunder bursts
                 this.intervalId = window.setInterval(() => {
                     if (!this.active) return;
                     if (Math.random() < 0.25) {
@@ -374,7 +401,6 @@ class SoundChannel {
                 break;
             }
             case 'cafe': {
-                // Soft warm texture
                 const noise = ctx.createBufferSource();
                 noise.buffer = this.buildNoiseBuffer('pink');
                 noise.loop = true;
@@ -391,7 +417,6 @@ class SoundChannel {
                 break;
             }
             case 'birds': {
-                // Background forest rustle
                 const noise = ctx.createBufferSource();
                 noise.buffer = this.buildNoiseBuffer('pink');
                 noise.loop = true;
@@ -406,7 +431,6 @@ class SoundChannel {
                 noise.start();
                 this.sourceNodes.push(noise, filter);
 
-                // Random synth chirps
                 this.intervalId = window.setInterval(() => {
                     if (!this.active) return;
                     if (Math.random() < 0.4) {
@@ -441,6 +465,7 @@ export class AmbientSoundEngine {
     private masterGain?: GainNode;
     private channels: Map<SoundId, SoundChannel> = new Map();
     private masterVolume: number = 0.8;
+    private activePresetId?: string;
     private sleepTimerTimeout?: number;
     private sleepTimerEndAt?: number;
     private listeners: Set<() => void> = new Set();
@@ -463,7 +488,7 @@ export class AmbientSoundEngine {
             this.masterGain.connect(this.ctx.destination);
 
             SOUND_DEFINITIONS.forEach((def) => {
-                this.channels.set(def.id, new SoundChannel(this.ctx!, this.masterGain!, def.id));
+                this.channels.set(def.id, new SoundChannel(this.ctx!, this.masterGain!, def));
             });
         }
     }
@@ -487,6 +512,7 @@ export class AmbientSoundEngine {
         } else {
             ch.start();
         }
+        this.activePresetId = undefined;
         this.notify();
     }
 
@@ -509,7 +535,7 @@ export class AmbientSoundEngine {
 
     public applyPreset(preset: PresetDef) {
         this.initContext();
-        // Stop channels not in preset
+        this.activePresetId = preset.id;
         this.channels.forEach((ch, id) => {
             if (preset.sounds[id] === undefined) {
                 ch.stop();
@@ -521,8 +547,15 @@ export class AmbientSoundEngine {
         this.notify();
     }
 
+    public nextPreset() {
+        const idx = PRESETS.findIndex((p) => p.id === this.activePresetId);
+        const nextIdx = (idx + 1) % PRESETS.length;
+        this.applyPreset(PRESETS[nextIdx]);
+    }
+
     public stopAll() {
         this.channels.forEach((ch) => ch.stop());
+        this.activePresetId = undefined;
         this.cancelSleepTimer();
         this.notify();
     }
@@ -532,9 +565,7 @@ export class AmbientSoundEngine {
         if (minutes <= 0) return;
 
         this.sleepTimerEndAt = Date.now() + minutes * 60 * 1000;
-
-        // Schedule fade out and stop
-        const fadeMs = 60 * 1000; // 1 min fade
+        const fadeMs = 60 * 1000;
         const totalMs = minutes * 60 * 1000;
 
         this.sleepTimerTimeout = window.setTimeout(() => {
@@ -564,15 +595,23 @@ export class AmbientSoundEngine {
     public getState() {
         const activeSounds: Record<SoundId, { active: boolean; volume: number }> = {} as any;
         let anyActive = false;
+        let activeCount = 0;
 
         this.channels.forEach((ch, id) => {
             activeSounds[id] = { active: ch.active, volume: ch.volume };
-            if (ch.active) anyActive = true;
+            if (ch.active) {
+                anyActive = true;
+                activeCount++;
+            }
         });
+
+        const activePreset = PRESETS.find((p) => p.id === this.activePresetId);
 
         return {
             masterVolume: this.masterVolume,
             anyActive,
+            activeCount,
+            activePreset,
             sleepTimerEndAt: this.sleepTimerEndAt,
             sounds: activeSounds,
         };

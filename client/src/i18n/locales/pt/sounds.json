@@ -1,23 +1,27 @@
 {
   "title": "Sons Relaxantes & Ruído Branco",
-  "subtitle": "Gerador de sons sintetizados para sono, concentração e tranquilidade para cães e gatos",
+  "subtitle": "Gerador de sons sintetizados e rádios ambiente para sono, concentração e acalmar cães e gatos",
   "stopAll": "Parar Todos os Sons",
   "presetsTitle": "Presets Rápidos",
   "presetTap": "Toque para aplicar",
-  "catalogTitle": "Catálogo de Sons",
+  "catalogTitle": "Catálogo de Sons & Rádios",
   "play": "Tocar",
   "stop": "Parar",
   "masterVolume": "Volume Mestre",
   "timer": "Timer de Sono",
 
   "preset": {
+    "lofi_chill": "Lofi Chill Beats",
+    "pet_calm": "Calmante para Pets",
     "deep_sleep": "Dormir Profundo",
     "rainy_night": "Noite Chuvosa",
-    "pet_calm": "Calmante para Pets",
-    "relax_focus": "Foco & Relaxamento"
+    "relax_piano": "Piano Relaxante"
   },
 
   "sound": {
+    "lofi_radio": "Rádio Lofi Chill",
+    "pet_music": "Música Calmante para Pets",
+    "relax_piano": "Piano Suave",
     "rain": "Chuva no Telhado",
     "thunder": "Trovão Distante",
     "fireplace": "Fogueira / Lareira",
@@ -32,6 +36,9 @@
   },
 
   "desc": {
+    "lofi_radio": "Beats suaves e relaxantes de Lofi ao vivo",
+    "pet_music": "Melodias suaves e calmas para cães e gatos",
+    "relax_piano": "Harmonias de piano para relaxar a casa",
     "rain": "Som contínuo de chuva suave caindo no telhado",
     "thunder": "Murmúrio grave e distante de tempestade",
     "fireplace": "Estalos suaves de madeira queimando na lareira",
