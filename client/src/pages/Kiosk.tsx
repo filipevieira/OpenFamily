@@ -431,12 +431,6 @@ const Kiosk: React.FC = () => {
         'rounded-card border p-6',
         photoActive ? 'border-white/10 bg-card/80 backdrop-blur-md' : 'border-border bg-card'
     );
-    const topButtonClass = cn(
-        'rounded-input border p-2.5 transition-colors',
-        photoActive
-            ? 'border-white/20 bg-black/30 text-white/80 backdrop-blur-md hover:text-white'
-            : 'border-border bg-card text-muted-foreground hover:text-foreground hover:border-border-strong'
-    );
 
     if (!hasToken) {
         return (
@@ -576,8 +570,14 @@ const Kiosk: React.FC = () => {
                     </div>
                 )}
 
-                <div className="flex items-center gap-2">
-                    <img src={`${import.meta.env.BASE_URL}OpenFamily.png`} alt="OpenFamily" className="hidden h-10 w-10 object-contain sm:block" />
+                {/* Floating Organic Action Bar */}
+                <div className={cn(
+                    'flex items-center gap-1 p-1 rounded-full border shadow-sm backdrop-blur-md transition-all',
+                    photoActive
+                        ? 'border-white/20 bg-black/40 text-white'
+                        : 'border-border bg-card/90 text-foreground'
+                )}>
+                    <img src={`${import.meta.env.BASE_URL}OpenFamily.png`} alt="OpenFamily" className="hidden h-7 w-7 object-contain ml-1 sm:block" />
 
                     {/* Ambient Sounds Button */}
                     <button
@@ -585,9 +585,14 @@ const Kiosk: React.FC = () => {
                         onClick={() => setSoundsOpen(true)}
                         aria-label="Sons Relaxantes & Ruído Branco"
                         title="Sons Relaxantes & Ruído Branco"
-                        className={cn(topButtonClass, soundsState.anyActive && 'border-primary text-primary bg-primary/10 animate-pulse')}
+                        className={cn(
+                            'h-8 w-8 rounded-full flex items-center justify-center transition-colors',
+                            soundsState.anyActive
+                                ? 'bg-primary text-primary-foreground animate-pulse shadow'
+                                : 'hover:bg-surface-2 text-muted-foreground hover:text-foreground'
+                        )}
                     >
-                        <Music className="h-5 w-5" />
+                        <Music className="h-4 w-4" />
                     </button>
 
                     {/* Quick Dimmer Brightness Button */}
@@ -601,34 +606,47 @@ const Kiosk: React.FC = () => {
                         }}
                         aria-label="Ajustar Brilho Noturno"
                         title={`Brilho Noturno: ${settings.brightness}%`}
-                        className={cn(topButtonClass, settings.brightness < 100 && 'border-amber-500/50 text-amber-400 bg-amber-500/10')}
+                        className={cn(
+                            'h-8 px-2 rounded-full flex items-center gap-1 transition-colors text-micro font-bold',
+                            settings.brightness < 100
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : 'hover:bg-surface-2 text-muted-foreground hover:text-foreground'
+                        )}
                     >
-                        <Sun className="h-5 w-5" />
-                        {settings.brightness < 100 && <span className="text-micro font-bold ml-1">{settings.brightness}%</span>}
+                        <Sun className="h-4 w-4" />
+                        {settings.brightness < 100 && <span>{settings.brightness}%</span>}
                     </button>
 
+                    {/* Display Settings Button */}
                     <button
                         type="button"
                         onClick={() => setSettingsOpen(true)}
                         aria-label={t('kiosk:displaySettings.open')}
-                        className={topButtonClass}
+                        title={t('kiosk:displaySettings.open')}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                     >
-                        <SettingsIcon className="h-5 w-5" />
+                        <SettingsIcon className="h-4 w-4" />
                     </button>
+
+                    {/* Fullscreen Button */}
                     <button
                         type="button"
                         onClick={toggleFullscreen}
                         aria-label={isFullscreen ? t('kiosk:exitFullscreen') : t('kiosk:fullscreen')}
-                        className={topButtonClass}
+                        title={isFullscreen ? t('kiosk:exitFullscreen') : t('kiosk:fullscreen')}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                     >
-                        {isFullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+                        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                     </button>
+
+                    {/* Exit Kiosk Link */}
                     <Link
                         to="/"
                         aria-label={t('kiosk:exit')}
-                        className={topButtonClass}
+                        title={t('kiosk:exit')}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                     >
-                        <X className="h-5 w-5" />
+                        <X className="h-4 w-4" />
                     </Link>
                 </div>
             </header>
