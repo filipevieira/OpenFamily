@@ -3,13 +3,14 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
     Calendar, UtensilsCrossed, CheckSquare, Users, Maximize2, Minimize2, X, MapPin,
-    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv,
+    Settings as SettingsIcon, ShoppingCart, Check, Undo2, Search, StickyNote, Copy, Tv, Globe,
     Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
 import { useAuth } from '../contexts/AuthContext';
 import { intlLocale } from '../i18n/format';
+import { changeAppLanguage } from '../lib/language';
 import { cn } from '../lib/utils';
 import FamilyNotes, { type FamilyNote } from '../components/app/FamilyNotes';
 
@@ -163,6 +164,12 @@ const Kiosk: React.FC = () => {
 
     // Live clock (updates every 15s — enough to flip the minute)
     useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlLang = urlParams.get('lang');
+        if (urlLang && ['pt', 'en', 'fr', 'zh'].includes(urlLang)) {
+            void changeAppLanguage(urlLang);
+        }
+
         const id = setInterval(() => setNow(new Date()), 15_000);
         return () => clearInterval(id);
     }, []);
@@ -774,6 +781,36 @@ const Kiosk: React.FC = () => {
                                     </button>
                                 </div>
                             )}
+                        </div>
+
+                        {/* Language Selector */}
+                        <div className="mt-5 border-t border-border pt-4 space-y-2">
+                            <p className="text-caption font-medium flex items-center gap-1.5">
+                                <Globe className="h-4 w-4 text-primary" /> Idioma / Language
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                                {[
+                                    { code: 'pt', label: 'Português' },
+                                    { code: 'en', label: 'English' },
+                                    { code: 'fr', label: 'Français' },
+                                    { code: 'zh', label: '中文' },
+                                ].map((lang) => (
+                                    <button
+                                        key={lang.code}
+                                        type="button"
+                                        onClick={() => void changeAppLanguage(lang.code)}
+                                        className={cn(
+                                            'py-2 px-3 rounded-input text-caption font-medium border text-left flex items-center justify-between transition-colors',
+                                            i18n.language?.startsWith(lang.code)
+                                                ? 'border-primary bg-primary/10 text-primary'
+                                                : 'border-border bg-surface-2 hover:bg-surface-2/80'
+                                        )}
+                                    >
+                                        <span>{lang.label}</span>
+                                        {i18n.language?.startsWith(lang.code) && <Check className="h-3.5 w-3.5 text-primary" />}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
