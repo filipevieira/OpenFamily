@@ -9,8 +9,6 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.EditText;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 public class MainActivity extends AppCompatActivity {
@@ -35,13 +33,15 @@ public class MainActivity extends AppCompatActivity {
         setupWebView();
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String savedUrl = prefs.getString(KEY_SERVER_URL, null);
+        String savedUrl = prefs.getString(KEY_SERVER_URL, DEFAULT_URL);
 
-        if (savedUrl == null || savedUrl.isEmpty()) {
-            promptServerUrl();
-        } else {
-            webView.loadUrl(savedUrl);
+        // Strip legacy token param if present so web app handles QR Code pairing seamlessly
+        if (savedUrl.contains("/kiosk?token=")) {
+            savedUrl = DEFAULT_URL;
+            prefs.edit().putString(KEY_SERVER_URL, DEFAULT_URL).apply();
         }
+
+        webView.loadUrl(savedUrl);
     }
 
     private void setupWebView() {
@@ -63,39 +63,6 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.setWebChromeClient(new WebChromeClient());
-    }
-
-    private void promptServerUrl() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("OpenFamily TV Setup");
-        builder.setMessage("Informe a URL do seu servidor OpenFamily (ex: https://familia.fvds.dev/kiosk?token=...):");
-
-        final EditText input = new EditText(this);
-        input.setText(DEFAULT_URL);
-        builder.setView(input);
-
-        builder.setPositiveButton("Salvar", (dialog, which) -> {
-            String url = input.getText().toString().trim();
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "https://" + url;
-            }
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_SERVER_URL, url)
-                    .apply();
-            webView.loadUrl(url);
-        });
-
-        builder.setNegativeButton("Usar Padrão", (dialog, which) -> {
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_SERVER_URL, DEFAULT_URL)
-                    .apply();
-            webView.loadUrl(DEFAULT_URL);
-        });
-
-        builder.setCancelable(false);
-        builder.show();
     }
 
     private void hideSystemUI() {
